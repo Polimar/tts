@@ -6,6 +6,8 @@
 **Lingua UI:** italiano (unica lingua in v1)  
 **Audience doc:** Frontend, Sound Designer, 2D Artist, Game Designer
 
+**Audio source of truth:** regole di pipeline, codec e loudness in [`docs/audio/BRIEF.md`](../audio/BRIEF.md) (PR in arrivo). Questo brief descrive **solo superfici UI** — non inventare regole audio oltre quanto riportato sotto.
+
 ---
 
 ## Contesto prodotto
@@ -92,10 +94,13 @@ Webapp per clonazione vocale locale e sintesi TTS in italiano. Ogni utente ha vo
 ### Flusso «Nuova voce»
 
 1. Click **Nuova voce** → upload audio
-2. UI mostra: formati accettati, durata massima, indicazioni loudness (**valori da Sound Designer** — placeholder UI finché non definiti)
-3. Progress upload **determinato** (barra %)
-4. Dopo submit → card in stato **In elaborazione** → polling o SSE fino a **Pronta** / **Errore**
-5. Errore: messaggio inline sulla card + toast
+2. **Formati accettati (UI):** WAV / FLAC (preferiti), MP3 / M4A (ok)
+3. **Helper copy (sotto il dropzone):** «8–90 s · ideale 15–30 s · un solo parlante»
+4. **Validazione client-side:** misura durata file → **blocca submit** se &lt; 8 s o &gt; 90 s (errore inline, es. «Durata non valida: min 8 s, max 90 s»)
+5. **Hint informativo (non controllo):** «Stereo→mono e resample a 24 kHz avvengono lato server» — **nessun toggle** stereo/mono o sample rate in UI
+6. Progress upload **determinato** (barra %)
+7. Dopo submit → card in stato **In elaborazione** → polling o SSE fino a **Pronta** / **Errore**
+8. Errore: messaggio inline sulla card + toast
 
 ### Stati voce
 
@@ -128,8 +133,9 @@ Webapp per clonazione vocale locale e sintesi TTS in italiano. Ogni utente ha vo
 
 - Drop file o incolla testo
 - Trattato come **un unico job** (non dialogo multi-voce)
-- Progress chunking (UI only): «Chunk 3/12» + titolo capitolo se presente nel sorgente
-- Regole chunk: **Sound Designer**; UI non implementa logica, solo superficie stato
+- **Progress (UI):** «Frase N / M» (o stima da backend) — **non** per-capitolo salvo titoli capitolo presenti nel sorgente
+- Gap frase **180 ms** / paragrafo **400 ms**: regole **engine** (vedi `docs/audio/BRIEF.md`) — **nessuno slider** in UI
+- **Download:** solo file completo WAV o MP3 — **nessun** pulsante ZIP chunk
 
 ### Azioni
 
@@ -164,7 +170,7 @@ Webapp per clonazione vocale locale e sintesi TTS in italiano. Ogni utente ha vo
 
 Usato quando un turno dialogo referenzia una **voce mancante** o non pronta.
 
-- **Mai** fallback silenzioso; senza voce → **impossibile generare**
+- **Mai** fallback silenzioso né **audio placeholder** su voce mancante; senza voce → **impossibile generare**
 - UI: **badge ambra** «Bloccato» + personaggio/voce mancante — **nessuna illustrazione** empty-state
 - CTA: **Apri voce** (deep link a `/voci`) o **Rimuovi turno** (se API lo consente)
 
@@ -195,18 +201,27 @@ Lista vuota: illustrazione lista vuota + CTA **Nuovo job** → `/nuovo`
 
 ### Download
 
-| Formato | Azione |
-|---------|--------|
-| WAV | **Scarica WAV** |
-| MP3 | **Scarica MP3** |
+Etichette esplicite (player + tooltip opzionale):
+
+| Pulsante | Label UI | Specifica (informativa, non editabile) |
+|----------|----------|------------------------------------------|
+| WAV | **Scarica WAV** | PCM 16-bit · 24 kHz · mono |
+| MP3 | **Scarica MP3** | 192 kbps CBR |
 
 Formato default pre-selezionato da Impostazioni utente.
+
+| Tipo job | Download disponibili |
+|----------|---------------------|
+| Testo / Libro | Solo file completo **WAV** o **MP3** — **no** ZIP chunk |
+| Dialogo (v1.1) | Stitch completo **WAV** / **MP3** + **Scarica ZIP** clip isolate (dry, senza gap) |
+
+**Loudness:** normalizzazione engine (−16 LUFS / −1.5 dBTP) — **nessuno slider loudness** in v1.
 
 ### Job dialogo (v1.1)
 
 - Play **stitch** completo (concat con gap)
 - Lista **clip per turno** con play individuale
-- **Scarica ZIP** clip isolate (contratto Game Designer)
+- **Scarica ZIP** clip isolate (dry, senza gap; dettaglio in `docs/audio/BRIEF.md`)
 
 ---
 
@@ -217,7 +232,7 @@ Formato default pre-selezionato da Impostazioni utente.
 | Sezione | Campi |
 |---------|-------|
 | Account | Email (read-only), **Cambia password** |
-| Export | Formato default: WAV / MP3 |
+| Export | Formato default: **WAV** (PCM 16-bit · 24 kHz · mono) o **MP3** (192 kbps CBR) — label come in Player |
 | Lingua | IT only (v1, nessun selettore) |
 
 **Nota (Game Designer lock):** il gap dialoghi **350 ms** è costante di prodotto — **non** compare in Impostazioni (né v1 né v1.1). Modificabile solo per-turno nell'editor (0–1500 ms).
@@ -241,7 +256,7 @@ Formato default pre-selezionato da Impostazioni utente.
 ### Regole invarianti
 
 - **Nessuna voce nel dialogo senza clone pronto** — turno resta **Bloccato** in coda; **Genera tutto** disabilitato
-- **Nessun fallback silenzioso**
+- **Nessun fallback silenzioso** né audio placeholder su turno senza voce
 - Dialoghi senza voci pronte → empty state con CTA **Vai alle voci** (`/voci`), non generazione
 - Libri restano job **mono-voce**; i dialoghi sono **multi-voce**
 - Cap: **8** personaggi, **40** turni, **4000** caratteri/turno (hard block UI)
@@ -283,8 +298,8 @@ Ogni riga = turno:
 
 ### Export dialogo
 
-- Un file WAV/MP3 (stitch)
-- ZIP clip isolate per turno
+- Stitch completo WAV / MP3 (con gap stitch)
+- ZIP clip isolate per turno (**dry**, senza gap)
 
 ### Avatar / busti personaggio (v1.1)
 
@@ -359,7 +374,7 @@ Target primario: **workstation locale Windows** (Arc GPU).
 
 | Team | Cosa consuma da questo brief | Cosa fornisce al Frontend |
 |------|-------------------------------|---------------------------|
-| **Sound Designer** | Upload constraints, chunking UI | Formati audio, max durata, loudness, regole chunk libro, API progress |
+| **Sound Designer** | Superfici upload/export, progress libro | [`docs/audio/BRIEF.md`](../audio/BRIEF.md): formati, durata clone, loudness, gap engine, export codec |
 | **2D Artist** | Empty states lock, identità visiva, badge v1.1, icon set 2 px | Logo (balloon+waveform), favicon, illustrazioni empty, avatar busti |
 | **Game Designer** | Contratto dialoghi, gap 350 ms costante, caps, export ZIP | Schema turno/personaggio, stitch rules, gap per-turno 0–1500 ms |
 | **Backend** | Auth, job states, file download | OpenAPI o equivalente per stati job/voce |
@@ -372,6 +387,7 @@ Target primario: **workstation locale Windows** (Arc GPU).
 - Modifiche al motore TTS o pipeline audio
 - Condivisione voci tra utenti
 - Multilingua UI oltre IT
+- Controlli audio engine in UI (loudness, stereo/mono, sample rate, gap frase/paragrafo libri)
 - Bozze job se backend non le supporta economicamente
 
 ---
@@ -380,11 +396,11 @@ Target primario: **workstation locale Windows** (Arc GPU).
 
 - [ ] Shell con nav IT e header email/logout
 - [ ] Login/registrazione con errori inline e remember session
-- [ ] Libreria voci con stati Pronta/In elaborazione/Errore e upload progress
-- [ ] Editor Nuovo job (Testo/Libro) con selettore voce obbligatorio
-- [ ] Coda con stato Bloccato e CTA voce mancante
-- [ ] Player con download WAV/MP3 e preview speed
-- [ ] Impostazioni account + formato export default
+- [ ] Libreria voci: upload WAV/FLAC/MP3/M4A, validazione durata 8–90 s client-side, helper copy
+- [ ] Editor Nuovo job (Testo/Libro): progress libro «Frase N/M», no ZIP su libri
+- [ ] Coda con stato Bloccato, badge ambra, no audio placeholder
+- [ ] Player: label export WAV (PCM 16-bit 24 kHz mono) / MP3 (192 CBR); ZIP solo dialoghi
+- [ ] Impostazioni: formato export default con label codec
 - [ ] Dialoghi v1.1: editor turni, character manager, caps, export ZIP (post v1)
 - [ ] Responsive desktop-first + adattamento mobile documentato
 
@@ -397,3 +413,4 @@ Target primario: **workstation locale Windows** (Arc GPU).
 | 2026-08-22 | 1.0 | Prima stesura; repo senza UI esistente |
 | 2026-08-22 | 1.1 | Avatar/busti personaggio v1.1 + token colore lock |
 | 2026-08-22 | 1.2 | Design room: identità teal, empty states lock, gap 350 ms fuori Impostazioni |
+| 2026-08-22 | 1.3 | Sound Designer lock: upload clone, export labels, progress libro, loudness engine-only |
