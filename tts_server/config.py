@@ -129,6 +129,7 @@ class Settings:
             "Ciao, questo è un test di sintesi vocale.",
         )
         self.mock_worker = _env_bool_first(("TTS_MOCK_WORKER", "MOCK_WORKER"), False)
+        # Public register without X-API-Key: default off (production). Dev/local only.
         self.allow_public_registration = _env_bool("ALLOW_PUBLIC_REGISTRATION", False)
         self.queue_poll_seconds = _env_float("QUEUE_POLL_SECONDS", 0.5)
         self.login_rate_limit_per_minute = _env_int("LOGIN_RATE_LIMIT_PER_MINUTE", 10)

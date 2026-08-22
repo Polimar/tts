@@ -51,8 +51,6 @@ def verify_api_key(x_api_key: Optional[str] = None) -> None:
 
     if settings.allow_public_registration:
         return
-    if settings.mock_worker and settings.api_key.startswith("change-me"):
-        return
     if not x_api_key or x_api_key != settings.api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

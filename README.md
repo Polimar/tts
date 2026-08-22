@@ -209,7 +209,7 @@ Il backend FastAPI importa `settings` invece di hardcodare host/porta/path.
 - Copia `.env.example` → `.env`; **non** committare `.env` o secrets reali.
 - Rotazione periodica di `JWT_SECRET` / `API_KEY` se usati.
 - `DATA_DIR` e output audio sono dati sensibili: backup e permessi OS appropriati.
-- Route pubbliche: solo `GET /health` e `POST /auth/login`. Register richiede header `X-API-Key`.
+- Route pubbliche: solo `GET /health` e `POST /auth/login`. Register richiede header `X-API-Key` (default). `ALLOW_PUBLIC_REGISTRATION=1` solo locale/dev.
 
 ---
 
