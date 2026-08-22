@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -17,11 +18,28 @@ async def lifespan(app: FastAPI):
 
     settings.ensure_data_dir()
     worker = get_worker()
-    worker.initialize()
     queue = get_job_queue()
+
+    async def _init_worker() -> None:
+        try:
+            await asyncio.to_thread(worker.initialize)
+            logger.info("Worker model initialization finished")
+        except Exception:
+            logger.exception("Worker model initialization failed")
+
+    init_task = asyncio.create_task(_init_worker())
     queue.start()
-    logger.info("TTS service started on %s:%s", settings.host, settings.port)
+    logger.info(
+        "TTS service listening on %s:%s (inference worker boots in background)",
+        settings.host,
+        settings.port,
+    )
     yield
+    init_task.cancel()
+    try:
+        await init_task
+    except asyncio.CancelledError:
+        pass
     queue.stop()
 
 

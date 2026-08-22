@@ -106,6 +106,9 @@ class Settings:
     queue_poll_seconds: float
     login_rate_limit_per_minute: int
     debug_mode: bool
+    http_read_timeout_seconds: float
+    http_upload_timeout_seconds: float
+    db_lock_timeout_seconds: float
 
     def __init__(self) -> None:
         self.host = _env_str("HOST", "0.0.0.0")
@@ -129,6 +132,9 @@ class Settings:
         self.queue_poll_seconds = _env_float("QUEUE_POLL_SECONDS", 0.5)
         self.login_rate_limit_per_minute = _env_int("LOGIN_RATE_LIMIT_PER_MINUTE", 10)
         self.debug_mode = _env_bool("DEBUG", False) or _env_bool("DEV", False)
+        self.http_read_timeout_seconds = _env_float("HTTP_READ_TIMEOUT_SECONDS", 10.0)
+        self.http_upload_timeout_seconds = _env_float("HTTP_UPLOAD_TIMEOUT_SECONDS", 120.0)
+        self.db_lock_timeout_seconds = _env_float("DB_LOCK_TIMEOUT_SECONDS", 5.0)
 
     @property
     def users_dir(self) -> Path:

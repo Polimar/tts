@@ -5,12 +5,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from tts_server.auth.cookies import SESSION_COOKIE
 from tts_server.db.database import get_db
+from tts_server.services.http_timeouts import run_blocking_io
 from tts_server.services.security import validate_safe_segment
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_current_user_id(
+async def get_current_user_id(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     tts_session: Optional[str] = Cookie(default=None),
 ) -> str:
@@ -27,19 +28,22 @@ def get_current_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    session = get_db().get_session(token)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    user_id = session["user_id"]
-    try:
-        validate_safe_segment(user_id, "user_id")
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
-    return user_id
+    def _resolve() -> str:
+        session = get_db().get_session(token)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user_id = session["user_id"]
+        try:
+            validate_safe_segment(user_id, "user_id")
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+        return user_id
+
+    return await run_blocking_io(_resolve, "auth/session")
 
 
 def verify_api_key(x_api_key: Optional[str] = None) -> None:

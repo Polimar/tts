@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any, Generator, Optional
 
 import tts_server.config as config_module
+from tts_server.services.http_timeouts import ServiceUnavailableError
+
+
+class DatabaseLockTimeout(ServiceUnavailableError):
+    """Could not acquire DB lock within deadline."""
 
 
 def utcnow() -> datetime:
@@ -25,14 +30,25 @@ class Database:
 
     @contextmanager
     def connect(self) -> Generator[sqlite3.Connection, None, None]:
-        with self._lock:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        lock_timeout = config_module.settings.db_lock_timeout_seconds
+        acquired = self._lock.acquire(timeout=lock_timeout)
+        if not acquired:
+            raise DatabaseLockTimeout("database lock busy")
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+                timeout=lock_timeout,
+            )
             conn.row_factory = sqlite3.Row
-            try:
-                yield conn
-                conn.commit()
-            finally:
+            conn.execute("PRAGMA journal_mode=WAL")
+            yield conn
+            conn.commit()
+        finally:
+            if conn is not None:
                 conn.close()
+            self._lock.release()
 
     def _init_schema(self) -> None:
         with self.connect() as conn:
@@ -130,13 +146,13 @@ class Database:
                 "SELECT * FROM sessions WHERE token = ?",
                 (token,),
             ).fetchone()
-        if not row:
-            return None
-        expires = datetime.fromisoformat(row["expires_at"])
-        if expires < utcnow():
-            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
-            return None
-        return dict(row)
+            if not row:
+                return None
+            expires = datetime.fromisoformat(row["expires_at"])
+            if expires < utcnow():
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                return None
+            return dict(row)
 
     def create_voice(
         self,
