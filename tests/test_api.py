@@ -5,6 +5,7 @@ import wave
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 os.environ["MOCK_WORKER"] = "1"
@@ -12,7 +13,6 @@ os.environ["JWT_SECRET"] = "test-jwt-secret"
 os.environ["API_KEY"] = "test-api-key"
 os.environ["QUEUE_POLL_SECONDS"] = "0.1"
 
-from tts_server.config import settings
 from tts_server.main import create_app
 
 
@@ -40,6 +40,14 @@ def client(tmp_path: Path):
     worker_module._worker = None
     worker_module._queue = None
 
+    from tts_server.auth import routes as auth_routes
+    from tts_server.services.rate_limit import SlidingWindowRateLimiter
+
+    auth_routes._auth_limiter = SlidingWindowRateLimiter(
+        max_events=config_module.settings.login_rate_limit_per_minute,
+        window_seconds=60.0,
+    )
+
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
@@ -59,16 +67,26 @@ def test_health_public(client: TestClient):
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"status": "ok", "worker_ready": True}
-    assert "model_id" not in body
-    assert "data_dir" not in body
-    assert "jwt" not in body
-    assert "api_key" not in body
+    assert body == {"status": "ok"}
+    assert set(body.keys()) == {"status"}
 
 
 def test_system_device_requires_auth(client: TestClient):
     resp = client.get("/system/device")
     assert resp.status_code == 401
+
+
+def test_system_device_minimal(client: TestClient):
+    token = _register(client, "deviceuser")
+    resp = client.get(
+        "/system/device",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"device", "status"}
+    assert body["device"] in {"cpu", "xpu"}
+    assert body["status"] in {"ready", "initializing"}
 
 
 def test_register_requires_api_key(client: TestClient):
@@ -163,6 +181,32 @@ def test_login_rate_limit(client: TestClient):
     assert blocked.status_code == 429
 
 
+def test_register_rate_limit(client: TestClient):
+    for i in range(12):
+        client.post(
+            "/auth/register",
+            headers={"X-API-Key": os.environ["API_KEY"]},
+            json={"username": f"user{i}", "password": "password123"},
+        )
+    blocked = client.post(
+        "/auth/register",
+        headers={"X-API-Key": os.environ["API_KEY"]},
+        json={"username": "user_blocked", "password": "password123"},
+    )
+    assert blocked.status_code == 429
+
+
+def test_upload_rejects_non_audio_content(client: TestClient):
+    token = _register(client, "uploaduser")
+    resp = client.post(
+        "/voices",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"name": "bad", "ref_text": "test", "language": "Italian"},
+        files={"audio": ("fake.wav", b"not-audio-content", "audio/wav")},
+    )
+    assert resp.status_code == 400
+
+
 def test_chunking_service():
     from tts_server.services.chunking import chunk_text
 
@@ -195,3 +239,43 @@ def test_resolve_rejects_traversal():
             resolve_under(base, "../outside")
     finally:
         base.rmdir()
+
+
+def test_audio_magic_validation():
+    from tts_server.services.audio_validate import detect_audio_format, validate_audio_upload
+
+    wav = _make_wav_bytes(0.1)
+    assert detect_audio_format(wav[:16]) == "wav"
+    validate_audio_upload(wav[:16], "audio/wav", ".wav")
+
+    with pytest.raises(ValueError):
+        validate_audio_upload(b"plaintext", "audio/wav", ".wav")
+
+
+def test_stream_upload_rejects_content_length():
+    import asyncio
+    from starlette.requests import Request
+    from starlette.datastructures import UploadFile
+
+    from tts_server.services.upload import stream_upload_bounded
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": [(b"content-length", b"99999999")],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def run():
+        request = Request(scope, receive)
+        upload = UploadFile(filename="a.wav", file=io.BytesIO(b"data"))
+        dest = Path("/tmp/tts-upload-test.bin")
+        with pytest.raises(HTTPException) as exc:
+            await stream_upload_bounded(request, upload, dest, max_bytes=1024)
+        assert exc.value.status_code == 413
+        assert not dest.exists()
+
+    asyncio.run(run())

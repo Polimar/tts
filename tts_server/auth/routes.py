@@ -9,7 +9,7 @@ from tts_server.services.security import hash_password, new_id, new_token, token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_login_limiter = SlidingWindowRateLimiter(
+_auth_limiter = SlidingWindowRateLimiter(
     max_events=settings.login_rate_limit_per_minute,
     window_seconds=60.0,
 )
@@ -24,11 +24,21 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
+def _enforce_auth_rate_limit(request: Request) -> None:
+    if not _auth_limiter.allow(_client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many authentication attempts; try again later",
+        )
+
+
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(
     body: RegisterRequest,
+    request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> AuthResponse:
+    _enforce_auth_rate_limit(request)
     verify_api_key(x_api_key)
     db = get_db()
     if db.get_user_by_username(body.username):
@@ -49,11 +59,7 @@ def register(
 
 @router.post("/login", response_model=AuthResponse)
 def login(body: LoginRequest, request: Request) -> AuthResponse:
-    if not _login_limiter.allow(_client_ip(request)):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts; try again later",
-        )
+    _enforce_auth_rate_limit(request)
 
     db = get_db()
     user = db.get_user_by_username(body.username)

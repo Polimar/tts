@@ -87,6 +87,13 @@ def job_export_path(users_dir: Path, user_id: str, job_id: str, ext: str) -> Pat
     return user_root(users_dir, user_id) / "exports" / job_id / f"output{ext}"
 
 
+def _path_within_base(base_resolved: Path, candidate: Path) -> None:
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError:
+        raise ValueError("Path traversal detected") from None
+
+
 def resolve_under(base: Path, rel_path: str) -> Path:
     """Resolve a relative path under base; reject traversal, absolute paths, and symlink escapes."""
     base_resolved = base.resolve()
@@ -100,35 +107,23 @@ def resolve_under(base: Path, rel_path: str) -> Path:
     for part in rel.parts:
         current = current / part
         if current.is_symlink():
-            symlink_target = current.resolve()
-            if not symlink_target.is_relative_to(base_resolved):
-                raise ValueError("Symlink escape detected")
+            _path_within_base(base_resolved, current.resolve())
 
     candidate = (base_resolved / rel).resolve()
-    if not candidate.is_relative_to(base_resolved):
-        raise ValueError("Path traversal detected")
+    _path_within_base(base_resolved, candidate)
     return candidate
 
 
 def rel_to_users_dir(users_dir: Path, path: Path) -> str:
     users_resolved = users_dir.resolve()
     path_resolved = path.resolve()
-    if not path_resolved.is_relative_to(users_resolved):
-        raise ValueError("Path outside user data directory")
-    return str(path_resolved.relative_to(users_resolved))
+    try:
+        return str(path_resolved.relative_to(users_resolved))
+    except ValueError:
+        raise ValueError("Path outside user data directory") from None
 
 
 def normalize_mime(content_type: str | None) -> str:
     if not content_type:
         return ""
     return content_type.split(";")[0].strip().lower()
-
-
-def is_allowed_audio_mime(content_type: str | None) -> bool:
-    return normalize_mime(content_type) in ALLOWED_AUDIO_MIME
-
-
-def is_allowed_text_mime(content_type: str | None) -> bool:
-    if not content_type:
-        return True
-    return normalize_mime(content_type) in ALLOWED_TEXT_MIME

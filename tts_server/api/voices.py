@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
 from tts_server.auth.dependencies import get_current_user_id
 from tts_server.config import settings, secure_mkdir
 from tts_server.db.database import get_db
 from tts_server.schemas import VoiceOut
+from tts_server.services.audio_validate import validate_audio_upload
 from tts_server.services.security import (
     ALLOWED_AUDIO_EXTENSIONS,
-    is_allowed_audio_mime,
     new_id,
     rel_to_users_dir,
     sanitize_filename,
@@ -14,12 +14,14 @@ from tts_server.services.security import (
     validate_safe_segment,
     voice_audio_path,
 )
+from tts_server.services.upload import stream_upload_bounded
 
 router = APIRouter(prefix="/voices", tags=["voices"])
 
 
 @router.post("", response_model=VoiceOut, status_code=status.HTTP_201_CREATED)
 async def create_voice(
+    request: Request,
     name: str = Form(...),
     ref_text: str = Form(...),
     language: str = Form(default="Italian"),
@@ -38,22 +40,23 @@ async def create_voice(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported audio format. Allowed: {sorted(ALLOWED_AUDIO_EXTENSIONS)}",
         )
-    if not is_allowed_audio_mime(audio.content_type):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported audio MIME type: {audio.content_type}",
-        )
-
-    content = await audio.read()
-    if len(content) > settings.max_upload_bytes:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Upload too large")
-    if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty upload")
 
     voice_id = new_id()
     dest = voice_audio_path(settings.users_dir, user_id, voice_id, filename)
     secure_mkdir(dest.parent)
-    dest.write_bytes(content)
+
+    _, header = await stream_upload_bounded(
+        request,
+        audio,
+        dest,
+        settings.max_upload_bytes,
+    )
+
+    try:
+        validate_audio_upload(header, audio.content_type, ext)
+    except ValueError as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     rel_path = rel_to_users_dir(settings.users_dir, dest)
     voice = get_db().create_voice(
