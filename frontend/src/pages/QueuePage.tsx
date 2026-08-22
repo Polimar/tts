@@ -1,39 +1,39 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { listJobs } from '../api/jobs'
+import { cancelJob, listJobs } from '../api/jobs'
+import { listVoices } from '../api/voices'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { StatusChip } from '../components/StatusChip'
+import { useToast } from '../components/ToastProvider'
 import { useActiveJobsPolling } from '../hooks/useJobPolling'
-import type { Job, JobType } from '../types/api'
+import type { Job, SourceType } from '../types/api'
+import { formatDateTime, formatProgressPercent } from '../utils/format'
 
-const TYPE_LABELS: Record<JobType, string> = {
+const SOURCE_LABELS: Record<SourceType, string> = {
   text: 'Testo',
-  book: 'Libro',
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('it-IT', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function truncate(text: string, max = 60): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text
+  chapter: 'Capitolo',
 }
 
 export function QueuePage() {
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const [jobs, setJobs] = useState<Job[]>([])
+  const [voiceNames, setVoiceNames] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<Job | null>(null)
 
   const loadJobs = useCallback(async () => {
     setError(null)
     try {
-      const data = await listJobs()
-      setJobs(data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()))
+      const [{ items }, { items: voices }] = await Promise.all([
+        listJobs({ limit: 100 }),
+        listVoices(),
+      ])
+      setJobs(items)
+      const names: Record<string, string> = {}
+      for (const v of voices) names[v.id] = v.name
+      setVoiceNames(names)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossibile caricare la coda.')
     } finally {
@@ -47,12 +47,34 @@ export function QueuePage() {
 
   useActiveJobsPolling(jobs, () => void loadJobs())
 
+  const queuedCount = useMemo(
+    () => jobs.filter((j) => j.status === 'queued').length,
+    [jobs],
+  )
+
+  const handleCancel = async () => {
+    if (!cancelTarget) return
+    try {
+      await cancelJob(cancelTarget.id)
+      showToast('Job annullato.', 'success')
+      setCancelTarget(null)
+      await loadJobs()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Annullamento fallito.', 'error')
+    }
+  }
+
   return (
     <div className="page">
       <header className="page-header">
         <div>
           <h1 className="page-header__title">Coda job</h1>
-          <p className="page-header__desc">Monitora i job di sintesi vocale.</p>
+          <p className="page-header__desc">
+            Monitora i job di sintesi vocale.
+            {queuedCount > 0 && (
+              <span className="queue-hint"> {queuedCount} in coda (max 10).</span>
+            )}
+          </p>
         </div>
         <Link to="/nuovo" className="btn btn--primary">
           Nuovo job
@@ -93,49 +115,74 @@ export function QueuePage() {
               <tr>
                 <th>Stato</th>
                 <th>Tipo</th>
+                <th>Titolo</th>
                 <th>Voce</th>
-                <th>Testo</th>
                 <th>Creato</th>
-                <th>Progresso</th>
+                <th>Coda / Progresso</th>
+                <th>Azioni</th>
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => (
-                <tr
-                  key={job.id}
-                  className="data-table__row--clickable"
-                  onClick={() => navigate(`/coda/${job.id}`)}
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      navigate(`/coda/${job.id}`)
-                    }
-                  }}
-                >
-                  <td>
-                    <StatusChip status={job.status} />
-                  </td>
-                  <td>{TYPE_LABELS[job.job_type] ?? job.job_type}</td>
-                  <td>{job.voice_name ?? job.voice_id}</td>
-                  <td className="data-table__truncate">{truncate(job.text)}</td>
-                  <td>{formatDateTime(job.created_at)}</td>
-                  <td>
-                    {job.status === 'running' && job.progress != null ? (
-                      <div className="progress-bar">
-                        <div className="progress-bar__fill" style={{ width: `${job.progress}%` }} />
-                        <span className="progress-bar__label">{job.progress}%</span>
-                      </div>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {jobs.map((job) => {
+                const pct = formatProgressPercent(job.progress)
+                return (
+                  <tr key={job.id}>
+                    <td>
+                      <StatusChip status={job.status} />
+                    </td>
+                    <td>{SOURCE_LABELS[job.source_type] ?? job.source_type}</td>
+                    <td className="data-table__truncate">
+                      {job.title ?? <span className="text-muted">—</span>}
+                    </td>
+                    <td>{voiceNames[job.voice_id] ?? job.voice_id.slice(0, 8)}</td>
+                    <td>{formatDateTime(job.created_at)}</td>
+                    <td>
+                      {job.status === 'queued' && job.queue_position != null ? (
+                        <span>Pos. {job.queue_position}</span>
+                      ) : job.status === 'running' ? (
+                        <div className="progress-bar">
+                          <div className="progress-bar__fill" style={{ width: `${pct}%` }} />
+                          <span className="progress-bar__label">{pct}%</span>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="data-table__actions">
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        onClick={() => navigate(`/coda/${job.id}`)}
+                      >
+                        Apri
+                      </button>
+                      {job.status === 'queued' && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => setCancelTarget(job)}
+                        >
+                          Annulla
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        title="Annulla job"
+        message="Sei sicuro di voler annullare questo job in coda?"
+        confirmLabel="Annulla job"
+        destructive
+        onConfirm={() => void handleCancel()}
+        onCancel={() => setCancelTarget(null)}
+      />
     </div>
   )
 }

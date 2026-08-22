@@ -225,8 +225,24 @@ code {
 .chip--processing { background: rgba(91, 141, 239, 0.2); color: var(--color-running); }
 .chip--done,
 .chip--ready { background: rgba(76, 175, 130, 0.2); color: var(--color-done); }
-.chip--failed,
-.chip--error { background: rgba(224, 92, 92, 0.2); color: var(--color-failed); }
+.chip--failed { background: rgba(224, 92, 92, 0.2); color: var(--color-failed); }
+.chip--cancelled { background: rgba(107, 114, 128, 0.2); color: var(--color-queued); }
+
+.queue-hint {
+  color: var(--color-text-muted);
+}
+
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.data-table__actions {
+  display: flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
 
 .badge {
   font-size: 0.65rem;

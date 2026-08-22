@@ -2,8 +2,9 @@ import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { createJob } from '../api/jobs'
 import { listVoices } from '../api/voices'
+import { HttpError } from '../api/client'
 import { useToast } from '../components/ToastProvider'
-import type { JobType, Voice } from '../types/api'
+import type { Voice } from '../types/api'
 
 type EditorMode = 'text' | 'book'
 
@@ -13,17 +14,18 @@ export function NewJobPage() {
   const [voices, setVoices] = useState<Voice[]>([])
   const [loading, setLoading] = useState(true)
   const [voiceId, setVoiceId] = useState('')
+  const [title, setTitle] = useState('')
   const [mode, setMode] = useState<EditorMode>('text')
   const [text, setText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [queueFullError, setQueueFullError] = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
       try {
-        const data = await listVoices()
-        setVoices(data)
-        const ready = data.filter((v) => v.status === 'ready')
-        if (ready.length > 0) setVoiceId(ready[0].id)
+        const { items } = await listVoices()
+        setVoices(items)
+        if (items.length > 0) setVoiceId(items[0].id)
       } catch (err) {
         showToast(err instanceof Error ? err.message : 'Errore nel caricamento voci.', 'error')
       } finally {
@@ -32,9 +34,7 @@ export function NewJobPage() {
     })()
   }, [showToast])
 
-  const readyVoices = voices.filter((v) => v.status === 'ready')
   const charCount = text.length
-  const jobType: JobType = mode === 'book' ? 'book' : 'text'
 
   const handleFileDrop = (file: File) => {
     const reader = new FileReader()
@@ -42,6 +42,7 @@ export function NewJobPage() {
       const content = typeof reader.result === 'string' ? reader.result : ''
       setText(content)
       setMode('book')
+      if (!title) setTitle(file.name.replace(/\.[^.]+$/, ''))
     }
     reader.readAsText(file)
   }
@@ -50,15 +51,20 @@ export function NewJobPage() {
     e.preventDefault()
     if (!voiceId || !text.trim()) return
     setSubmitting(true)
+    setQueueFullError(null)
     try {
       const job = await createJob({
-        text: text.trim(),
         voice_id: voiceId,
-        job_type: jobType,
+        source_type: 'text',
+        text: text.trim(),
+        title: title.trim() || undefined,
       })
       showToast('Job creato con successo.', 'success')
       navigate(`/coda/${job.id}`)
     } catch (err) {
+      if (err instanceof HttpError && err.code === 'queue_full') {
+        setQueueFullError(err.message)
+      }
       showToast(err instanceof Error ? err.message : 'Creazione job fallita.', 'error')
     } finally {
       setSubmitting(false)
@@ -74,12 +80,18 @@ export function NewJobPage() {
         </div>
       </header>
 
+      {queueFullError && (
+        <div className="alert alert--error" role="alert">
+          {queueFullError}
+        </div>
+      )}
+
       {loading ? (
         <div className="skeleton-block" />
-      ) : readyVoices.length === 0 ? (
+      ) : voices.length === 0 ? (
         <div className="empty-state">
-          <h2>Nessuna voce pronta</h2>
-          <p>Carica e attendi l'elaborazione di almeno una voce prima di generare audio.</p>
+          <h2>Nessuna voce disponibile</h2>
+          <p>Carica almeno una voce prima di generare audio.</p>
           <Link to="/voci" className="btn btn--primary">
             Vai a Voci
           </Link>
@@ -95,7 +107,7 @@ export function NewJobPage() {
                 onChange={(e) => setVoiceId(e.target.value)}
                 required
               >
-                {readyVoices.map((v) => (
+                {voices.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}
                   </option>
@@ -120,6 +132,17 @@ export function NewJobPage() {
               </button>
             </div>
           </div>
+
+          <label className="field">
+            <span className="field__label">Titolo (opzionale)</span>
+            <input
+              className="field__input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={200}
+              placeholder="Es. Capitolo 1"
+            />
+          </label>
 
           {mode === 'book' && (
             <div
@@ -156,6 +179,7 @@ export function NewJobPage() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               required
+              maxLength={50000}
               rows={mode === 'book' ? 20 : 8}
               placeholder={
                 mode === 'book'
@@ -163,7 +187,9 @@ export function NewJobPage() {
                   : 'Scrivi il testo da convertire in audio…'
               }
             />
-            <span className="field__hint">{charCount.toLocaleString('it-IT')} caratteri</span>
+            <span className="field__hint">
+              {charCount.toLocaleString('it-IT')} / 50.000 caratteri
+            </span>
           </label>
 
           <div className="job-editor__actions">

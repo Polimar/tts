@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getJob } from '../api/jobs'
-import type { Job, JobStatus } from '../types/api'
+import type { JobDetail, JobStatus } from '../types/api'
 
-export type { Job }
+export type { JobDetail as Job }
 
-const TERMINAL: JobStatus[] = ['done', 'failed']
+const TERMINAL: JobStatus[] = ['done', 'failed', 'cancelled']
 const DEFAULT_INTERVAL_MS = 3000
 
 export interface UseJobPollingOptions {
   enabled?: boolean
   intervalMs?: number
-  onUpdate?: (job: Job) => void
+  onUpdate?: (job: JobDetail) => void
 }
 
 /**
@@ -22,7 +22,7 @@ export function useJobPolling(
   options: UseJobPollingOptions = {},
 ) {
   const { enabled = true, intervalMs = DEFAULT_INTERVAL_MS, onUpdate } = options
-  const [job, setJob] = useState<Job | null>(null)
+  const [job, setJob] = useState<JobDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const onUpdateRef = useRef(onUpdate)
@@ -99,7 +99,7 @@ export function useJobPolling(
  * Extension point GDW: centralizzare qui l'aggiornamento della coda.
  */
 export function useActiveJobsPolling(
-  jobs: Job[],
+  jobs: { status: JobStatus }[],
   onRefresh: () => void,
   intervalMs = DEFAULT_INTERVAL_MS,
 ) {

@@ -1,4 +1,5 @@
 import { useAuth } from '../hooks/useAuth'
+import { formatDateTime } from '../utils/format'
 
 export function SettingsPage() {
   const { user } = useAuth()
@@ -23,7 +24,20 @@ export function SettingsPage() {
             <dt>ID utente</dt>
             <dd><code>{user?.id}</code></dd>
           </div>
+          {user?.created_at && (
+            <div>
+              <dt>Registrato il</dt>
+              <dd>{formatDateTime(user.created_at)}</dd>
+            </div>
+          )}
         </dl>
+      </section>
+
+      <section className="settings-section">
+        <h2>Sessione</h2>
+        <p className="text-muted">
+          Autenticazione tramite cookie httpOnly <code>tts_session</code>.
+        </p>
       </section>
 
       <section className="settings-section">

@@ -1,24 +1,12 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { createVoice, deleteVoice, listVoices } from '../api/voices'
+import { HttpError } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { StatusChip } from '../components/StatusChip'
 import { useToast } from '../components/ToastProvider'
 import type { Voice } from '../types/api'
+import { formatDate, formatDuration } from '../utils/format'
 
-function formatDuration(seconds?: number | null): string {
-  if (!seconds) return '—'
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')} min`
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('it-IT', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
-}
+const ACCEPTED_AUDIO = 'audio/wav,audio/mpeg,audio/mp4,audio/x-m4a,.wav,.mp3,.mp4,.m4a'
 
 export function VoicesPage() {
   const { showToast } = useToast()
@@ -34,8 +22,8 @@ export function VoicesPage() {
   const loadVoices = useCallback(async () => {
     setError(null)
     try {
-      const data = await listVoices()
-      setVoices(data)
+      const { items } = await listVoices()
+      setVoices(items)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossibile caricare le voci.')
     } finally {
@@ -47,21 +35,13 @@ export function VoicesPage() {
     void loadVoices()
   }, [loadVoices])
 
-  const hasProcessing = voices.some((v) => v.status === 'processing')
-
-  useEffect(() => {
-    if (!hasProcessing) return
-    const timer = setInterval(() => void loadVoices(), 3000)
-    return () => clearInterval(timer)
-  }, [hasProcessing, loadVoices])
-
   const handleUpload = async (e: FormEvent) => {
     e.preventDefault()
     if (!file || !name.trim()) return
     setUploading(true)
     try {
       await createVoice(name.trim(), file)
-      showToast('Voce caricata con successo.', 'success')
+      showToast('Voce creata con successo.', 'success')
       setShowUpload(false)
       setName('')
       setFile(null)
@@ -81,7 +61,11 @@ export function VoicesPage() {
       setDeleteTarget(null)
       await loadVoices()
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Eliminazione fallita.', 'error')
+      if (err instanceof HttpError && err.code === 'voice_in_use') {
+        showToast(err.message, 'error')
+      } else {
+        showToast(err instanceof Error ? err.message : 'Eliminazione fallita.', 'error')
+      }
     }
   }
 
@@ -131,21 +115,17 @@ export function VoicesPage() {
             <article key={voice.id} className="voice-card">
               <div className="voice-card__header">
                 <h3 className="voice-card__name">{voice.name}</h3>
-                <StatusChip status={voice.status} kind="voice" />
               </div>
               <dl className="voice-card__meta">
                 <div>
                   <dt>Durata campione</dt>
-                  <dd>{formatDuration(voice.sample_duration_sec)}</dd>
+                  <dd>{formatDuration(voice.duration_sec)}</dd>
                 </div>
                 <div>
                   <dt>Creata</dt>
                   <dd>{formatDate(voice.created_at)}</dd>
                 </div>
               </dl>
-              {voice.status === 'error' && (
-                <p className="voice-card__error">Elaborazione fallita. Ricarica un nuovo campione.</p>
-              )}
               <div className="voice-card__actions">
                 <button
                   type="button"
@@ -172,19 +152,22 @@ export function VoicesPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
+                  maxLength={100}
                   placeholder="Es. Narratore"
                 />
               </label>
               <label className="field">
-                <span className="field__label">Campione audio</span>
+                <span className="field__label">Campione audio (reference_audio)</span>
                 <input
                   type="file"
-                  accept="audio/*"
+                  accept={ACCEPTED_AUDIO}
                   className="field__input"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   required
                 />
-                <span className="field__hint">Formati audio comuni. Durata consigliata: 30s–3min.</span>
+                <span className="field__hint">
+                  WAV, MP3, MP4 o M4A. Max 20 MB. Durata consigliata: 3–60 secondi.
+                </span>
               </label>
               <div className="dialog__actions">
                 <button type="button" className="btn btn--secondary" onClick={() => setShowUpload(false)}>

@@ -2,6 +2,8 @@
 
 UI web italiana per la webapp TTS (clonazione vocale + sintesi).
 
+Contratto API: `docs/API.md`, `openapi.yaml` (branch `cursor/docs-architecture-api-145f` / PR #3).
+
 ## Sviluppo
 
 ```bash
@@ -11,6 +13,7 @@ npm run dev
 ```
 
 Il dev server Vite (`:5173`) fa proxy di `/api` verso il backend FastAPI su `http://localhost:8765`.
+Auth: cookie httpOnly `tts_session`, `credentials: 'include'`.
 
 ## Build
 
@@ -29,12 +32,6 @@ npm run preview
 | `/coda` | Coda job |
 | `/coda/:jobId` | Dettaglio job + player |
 | `/impostazioni` | Account |
-
-## API
-
-Tutte le chiamate usano `credentials: 'include'` verso `/api/v1/*`.
-
-Vedi la descrizione della PR per il contratto request/response assunto.
 
 ## Extension points (Game Dev Web)
 

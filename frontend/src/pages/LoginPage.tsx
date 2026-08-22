@@ -34,8 +34,8 @@ export function LoginPage() {
 
       let redirectTo = '/coda'
       try {
-        const voices = await listVoices()
-        if (voices.length === 0) redirectTo = '/voci'
+        const { items } = await listVoices()
+        if (items.length === 0) redirectTo = '/voci'
       } catch {
         redirectTo = '/voci'
       }

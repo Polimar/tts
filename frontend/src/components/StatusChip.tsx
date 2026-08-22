@@ -1,27 +1,17 @@
-import type { JobStatus, VoiceStatus } from '../types/api'
+import type { JobStatus } from '../types/api'
 
 const JOB_LABELS: Record<JobStatus, string> = {
   queued: 'In coda',
   running: 'In elaborazione',
   done: 'Completato',
   failed: 'Errore',
-}
-
-const VOICE_LABELS: Record<VoiceStatus, string> = {
-  ready: 'Pronta',
-  processing: 'In elaborazione',
-  error: 'Errore',
+  cancelled: 'Annullato',
 }
 
 interface StatusChipProps {
-  status: JobStatus | VoiceStatus
-  kind?: 'job' | 'voice'
+  status: JobStatus
 }
 
-export function StatusChip({ status, kind = 'job' }: StatusChipProps) {
-  const label = kind === 'voice'
-    ? VOICE_LABELS[status as VoiceStatus] ?? status
-    : JOB_LABELS[status as JobStatus] ?? status
-
-  return <span className={`chip chip--${status}`}>{label}</span>
+export function StatusChip({ status }: StatusChipProps) {
+  return <span className={`chip chip--${status}`}>{JOB_LABELS[status]}</span>
 }
