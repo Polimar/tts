@@ -1,0 +1,651 @@
+openapi: 3.1.0
+info:
+  title: TTS API
+  description: |
+    API per sintesi vocale con clonazione voce (Qwen3-TTS su Intel Arc XPU).
+    Autenticazione via cookie di sessione `tts_session`.
+    UI v1 solo in italiano; messaggi di errore in italiano con `code` stabile.
+  version: 1.0.0
+  contact:
+    name: tts.alevale.it
+
+servers:
+  - url: http://0.0.0.0:8765/api/v1
+    description: Server locale / produzione
+
+tags:
+  - name: auth
+    description: Registrazione, login e sessione
+  - name: voices
+    description: Voci clonate dell'utente
+  - name: jobs
+    description: Coda sintesi TTS (un solo job running su GPU)
+  - name: audio
+    description: Download e streaming audio sintetizzato
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Registra un nuovo utente
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: mario.rossi@example.com
+              password: Sicura123!
+      responses:
+        '201':
+          description: Utente creato e sessione aperta
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Cookie tts_session (HttpOnly)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Accedi con email e password
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login riuscito
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Chiudi sessione
+      operationId: logout
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Sessione invalidata
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Profilo utente corrente
+      operationId: getMe
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Profilo utente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /voices:
+    get:
+      tags: [voices]
+      summary: Elenca le voci dell'utente
+      operationId: listVoices
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Lista voci
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [voices]
+      summary: Crea una voce da audio di riferimento
+      operationId: createVoice
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, reference_audio]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                reference_audio:
+                  type: string
+                  format: binary
+                  description: WAV, MP3, MP4 o M4A; max 20 MB
+      responses:
+        '201':
+          description: Voce creata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voice'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /voices/{voice_id}:
+    parameters:
+      - $ref: '#/components/parameters/VoiceId'
+    get:
+      tags: [voices]
+      summary: Dettaglio voce
+      operationId: getVoice
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Voce
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voice'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [voices]
+      summary: Elimina una voce
+      operationId: deleteVoice
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Voce eliminata
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /jobs:
+    get:
+      tags: [jobs]
+      summary: Elenca i job dell'utente
+      operationId: listJobs
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/JobStatus'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Lista job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [jobs]
+      summary: Crea un job di sintesi (entra in coda FIFO)
+      operationId: createJob
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '201':
+          description: Job accodato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /jobs/{job_id}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [jobs]
+      summary: Stato di un job
+      operationId: getJob
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Dettaglio job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{job_id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [jobs]
+      summary: Annulla un job in coda
+      operationId: cancelJob
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Job annullato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobCancelled'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /jobs/{job_id}/audio:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [audio]
+      summary: Scarica o stream audio WAV (supporta Range)
+      operationId: getJobAudio
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: File audio completo
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Content-Length:
+              schema:
+                type: integer
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Contenuto parziale (header Range)
+          headers:
+            Content-Range:
+              schema:
+                type: string
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: tts_session
+      description: Sessione httpOnly impostata da login/register
+
+  parameters:
+    VoiceId:
+      name: voice_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Error:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        detail:
+          type: string
+          description: Messaggio leggibile in italiano
+
+    ErrorCode:
+      type: string
+      enum:
+        - not_authenticated
+        - invalid_credentials
+        - forbidden
+        - voice_not_found
+        - job_not_found
+        - chapter_not_found
+        - audio_not_ready
+        - email_already_exists
+        - queue_full
+        - voice_in_use
+        - job_not_cancellable
+        - validation_error
+        - invalid_audio_type
+        - file_too_large
+        - audio_too_short
+        - audio_too_long
+        - synthesis_failed
+        - interrupted
+        - internal_error
+
+    User:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+
+    Voice:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        duration_sec:
+          type: number
+          format: float
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    VoiceListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Voice'
+        total:
+          type: integer
+
+    JobStatus:
+      type: string
+      enum: [queued, running, done, failed, cancelled]
+
+    SourceType:
+      type: string
+      enum: [text, chapter]
+
+    CreateJobRequest:
+      type: object
+      required: [voice_id, source_type]
+      properties:
+        voice_id:
+          type: string
+          format: uuid
+        source_type:
+          $ref: '#/components/schemas/SourceType'
+        text:
+          type: string
+          maxLength: 50000
+          description: Obbligatorio se source_type è text
+        chapter_id:
+          type: string
+          format: uuid
+          description: Obbligatorio se source_type è chapter
+        title:
+          type: string
+          maxLength: 200
+
+    Job:
+      type: object
+      required:
+        - id
+        - voice_id
+        - status
+        - source_type
+        - progress
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        voice_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        source_type:
+          $ref: '#/components/schemas/SourceType'
+        title:
+          type: string
+          nullable: true
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        queue_position:
+          type: integer
+          nullable: true
+          description: Posizione FIFO; null se non in coda
+        error_code:
+          $ref: '#/components/schemas/ErrorCode'
+          nullable: true
+        error_detail:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    JobDetail:
+      allOf:
+        - $ref: '#/components/schemas/Job'
+        - type: object
+          properties:
+            audio_ready:
+              type: boolean
+              description: true se status è done e il file WAV esiste
+
+    JobListResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    JobCancelled:
+      type: object
+      required: [id, status, finished_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [cancelled]
+        queue_position:
+          type: 'null'
+        finished_at:
+          type: string
+          format: date-time
+
+  responses:
+    Unauthorized:
+      description: Non autenticato
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: not_authenticated
+            detail: Sessione non valida o scaduta.
+    Forbidden:
+      description: Accesso negato
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: forbidden
+            detail: Non hai i permessi per questa risorsa.
+    NotFound:
+      description: Risorsa non trovata
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflitto
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            queue_full:
+              value:
+                code: queue_full
+                detail: La coda di sintesi è piena. Riprova più tardi.
+            email_exists:
+              value:
+                code: email_already_exists
+                detail: Esiste già un account con questa email.
+    ValidationError:
+      description: Input non valido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: validation_error
+            detail: La password deve contenere almeno 8 caratteri.
