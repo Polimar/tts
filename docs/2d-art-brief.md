@@ -23,7 +23,7 @@
 
 ## Avatar personaggi
 
-- **Sorgente:** PNG **512×512**. Busto (testa + spalle) con ~**8%** margine circle-safe; in UI si applica **mask cerchio CSS** — non si consegna solo un PNG già ritagliato a cerchio.
+- **Sorgente:** PNG **512×512** in `docs/ui/avatars/` (es. `avatar-01.png` … `avatar-04.png` — set campione, cap v1.1 = 8). Busto (testa + spalle) con ~**8%** margine circle-safe; in UI si applica **mask cerchio CSS** — non si consegna solo un PNG già ritagliato a cerchio.
 - **Display:** chip lista **32/40 px**; editor/dettaglio **64/96 px** (cerchio).
 - **Stile:** stessa palette (teal/cream/ink). Flat editorial, no fotoreal, no mascotte.
 - **Uso:** chip UI per **Personaggio** (display) — non sono asset voce. Max **8 personaggi** in v1.1.
