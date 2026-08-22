@@ -1,3 +1,4 @@
+import gc
 import logging
 import threading
 import time
@@ -43,6 +44,16 @@ def _ensure_warmup_reference(path: Path) -> Path:
     return path
 
 
+def _empty_device_cache() -> None:
+    import torch
+
+    gc.collect()
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        torch.xpu.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 class Qwen3Worker:
     """Qwen3-TTS 0.6B Base worker. CPU default; XPU only after full-generate gate passes."""
 
@@ -61,6 +72,34 @@ class Qwen3Worker:
     def initialized(self) -> bool:
         return self._initialized
 
+    def _load_model(self, device_map: DeviceChoice) -> Any:
+        import torch
+        from qwen_tts import Qwen3TTSModel
+
+        logger.info("Loading Qwen3-TTS model from %s (device_map=%s)", settings.model_path, device_map)
+        return Qwen3TTSModel.from_pretrained(
+            settings.model_path,
+            device_map=device_map,
+            dtype=torch.bfloat16,
+        )
+
+    def _dispose_model(self, model: Any) -> None:
+        """Drop model references and clear accelerator caches — never .to() between devices."""
+        del model
+        _empty_device_cache()
+
+    def _reload_on_cpu(self, reason: str) -> None:
+        """Fail-closed: fresh CPU load instead of moving a half-placed model with .to()."""
+        logger.warning("Fail-closed: disposing model and reloading on CPU (%s)", reason)
+        if self._model is not None:
+            self._dispose_model(self._model)
+        self._model = self._load_model("cpu")
+        self._device = "cpu"
+        if self._info:
+            self._info.device = "cpu"
+            self._info.xpu_gate_passed = False
+            self._info.xpu_gate_reason = reason
+
     def initialize(self) -> WorkerInfo:
         if settings.mock_worker:
             self._info = WorkerInfo(
@@ -78,20 +117,12 @@ class Qwen3Worker:
             return self._info
 
         import torch
-        from qwen_tts import Qwen3TTSModel
 
         model_path = settings.model_path
-        logger.info("Loading Qwen3-TTS model from %s", model_path)
-
-        model = Qwen3TTSModel.from_pretrained(
-            model_path,
-            device_map="cpu",
-            dtype=torch.bfloat16,
-        )
-
         warmup_ref = _ensure_warmup_reference(settings.data_dir / "warmup" / "reference.wav")
         warmup_ref_text = "Questo è un breve campione di riferimento per il warmup."
 
+        model = self._load_model("cpu")
         cpu_time = self._benchmark_synthesis(
             model,
             device="cpu",
@@ -111,16 +142,19 @@ class Qwen3Worker:
         xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
         if settings.tts_device == "xpu" and xpu_available:
             gate_reason = "evaluating"
+            xpu_model: Any = None
             try:
-                model.model = model.model.to("xpu")
+                self._dispose_model(model)
+                model = None
+
+                xpu_model = self._load_model("xpu")
                 xpu_memory = int(torch.xpu.memory_allocated())
                 if xpu_memory <= 0:
-                    gate_reason = "xpu memory_allocated=0 after to('xpu')"
-                    model.model = model.model.to("cpu")
+                    gate_reason = "xpu memory_allocated=0 after device_map=xpu load"
                     logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
                 else:
                     xpu_time = self._benchmark_synthesis(
-                        model,
+                        xpu_model,
                         device="xpu",
                         text=settings.warmup_text,
                         ref_audio=warmup_ref,
@@ -128,27 +162,29 @@ class Qwen3Worker:
                     )
                     if xpu_time == float("inf"):
                         gate_reason = (
-                            "XPU warmup generate failed or timing missing "
-                            "(fail-closed to CPU)"
+                            "XPU warmup generate failed or timing missing (fail-closed to CPU)"
                         )
-                        model.model = model.model.to("cpu")
                         logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
                     elif xpu_time >= cpu_time:
-                        gate_reason = f"XPU slower than CPU (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
-                        model.model = model.model.to("cpu")
+                        gate_reason = (
+                            f"XPU slower than CPU (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
+                        )
                         logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
                     else:
                         xpu_gate_passed = True
                         gate_reason = f"passed (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
                         chosen = "xpu"
+                        model = xpu_model
+                        xpu_model = None
                         logger.info("XPU gate: PASSED %s -> device=xpu", gate_reason)
             except Exception as exc:
                 gate_reason = f"XPU setup error: {exc}"
-                try:
-                    model.model = model.model.to("cpu")
-                except Exception:
-                    pass
                 logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+            finally:
+                if xpu_model is not None and chosen != "xpu":
+                    self._dispose_model(xpu_model)
+                if model is None:
+                    model = self._load_model("cpu")
         elif settings.tts_device == "xpu" and not xpu_available:
             gate_reason = "torch.xpu not available"
             logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
@@ -184,19 +220,11 @@ class Qwen3Worker:
         ref_audio: Path,
         ref_text: str,
     ) -> float:
-        import torch
-
-        try:
-            if device == "xpu" and hasattr(torch, "xpu"):
-                model.model = model.model.to("xpu")
-            else:
-                model.model = model.model.to("cpu")
-        except Exception as exc:
-            logger.warning("Could not move model to %s for benchmark: %s", device, exc)
-            return float("inf")
-
+        """Benchmark on the device the model was loaded with (device_map). No .to() between devices."""
         start = time.perf_counter()
         try:
+            import torch
+
             with torch.inference_mode():
                 prompt = model.create_voice_clone_prompt(
                     ref_audio=str(ref_audio),
@@ -242,30 +270,20 @@ class Qwen3Worker:
                     voice_clone_prompt=voice_prompt,
                 )
             except Exception as exc:
-                if self._device == "xpu":
-                    logger.warning(
-                        "XPU synthesis failed (%s); fail-closed retry on CPU", exc
-                    )
-                    import torch
-
-                    self._model.model = self._model.model.to("cpu")
-                    self._device = "cpu"
-                    if self._info:
-                        self._info.device = "cpu"
-                        self._info.xpu_gate_passed = False
-                        self._info.xpu_gate_reason = f"runtime fail-closed: {exc}"
-                    voice_prompt = self._model.create_voice_clone_prompt(
-                        ref_audio=str(ref_audio_path),
-                        ref_text=ref_text,
-                        x_vector_only_mode=False,
-                    )
-                    wavs, sr = self._model.generate_voice_clone(
-                        text=text,
-                        language=language,
-                        voice_clone_prompt=voice_prompt,
-                    )
-                else:
+                if self._device != "xpu":
                     raise
+                logger.warning("XPU synthesis failed (%s); fail-closed clean reload on CPU", exc)
+                self._reload_on_cpu(f"runtime fail-closed: {exc}")
+                voice_prompt = self._model.create_voice_clone_prompt(
+                    ref_audio=str(ref_audio_path),
+                    ref_text=ref_text,
+                    x_vector_only_mode=False,
+                )
+                wavs, sr = self._model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=voice_prompt,
+                )
             audio = np.asarray(wavs[0], dtype=np.float32)
             return audio, sr, voice_prompt
 

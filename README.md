@@ -141,18 +141,24 @@ Default: **`cpu`**. Il worker locale su Windows deve usare CPU finché non esist
 | `xpu` | **NO-GO** su hardware testato — non usare in produzione locale |
 | `cuda` | Non target per questo deploy Windows-first |
 
-#### XPU: esito ricerca (fail-closed)
+#### XPU: esito ricerca Gate 2 (fail-closed)
 
-Su **Windows Ultra 9 285H + Intel Arc 140T** il Researcher ha registrato **NO-GO**:
+Su **Windows Ultra 9 285H + Intel Arc 140T** (torch 2.13.0+xpu):
 
-- `torch 2.13.0+xpu`, `xpu.is_available()` → `True`
-- `model.model.to("xpu")` carica ~1,8 GB su `xpu:0`
-- `generate_voice_clone` **crash**: gli input ids restano su CPU mentre i pesi sono su `xpu:0`
-- Nessun timing post-warmup utile (la generazione non completa)
+| Percorso | Esito |
+|---|---|
+| `.to("xpu")` su modello caricato su CPU | **Broken** — input ids su CPU, pesi su XPU, generate crash |
+| `device_map="xpu"` + load dedicato | Generate **completa** (`memory_allocated > 0`), warmup ~15.7s poi ~6.86s |
+| CPU sullo stesso testo | **4.96s** → XPU ancora **più lento** → **NO-GO** |
+| `.to("cpu")` dopo tentativo XPU | **Unsafe** — ids residui su XPU; non usare `.to()` tra device |
 
-**Decisione team:** il worker usa **CPU** di default. XPU è ammesso solo se un warmup di generazione completa riesce **e** batte CPU su latenza; altrimenti **fail-closed** (non avviare su XPU). Spostare solo i pesi con `.to("xpu")` **non basta** — serve allineamento device su tutto il forward.
+**Regole worker (implementate):**
 
-Non documentare Intel Arc / XPU come percorso locale supportato finché questi criteri non sono soddisfatti.
+1. Default `TTS_DEVICE=cpu`.
+2. XPU solo se `TTS_DEVICE=xpu`, warmup generate **completo** su load `device_map="xpu"` **e** latenza **minore** di CPU sullo stesso testo.
+3. Fail-closed = **dispose + reload** del modello (`device_map="cpu"`), mai spostare tensori con `.to()` tra CPU/XPU.
+
+Non documentare Intel Arc / XPU come percorso locale supportato finché XPU batte CPU su benchmark warmup.
 
 La coda inference è **seriale**: un solo job alla volta sul device attivo; non avviare più worker concorrenti sullo stesso accelerator.
 
