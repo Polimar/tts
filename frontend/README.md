@@ -1,40 +1,19 @@
-# TTS Studio — Frontend
+# Frontend TTS
 
-UI web italiana per la webapp TTS (clonazione vocale + sintesi).
+UI italiana (Vite + React). Proxy dev: `/api/v1` → `:8765`.
 
-Contratto API: `docs/API.md`, `openapi.yaml` (branch `cursor/docs-architecture-api-145f` / PR #3).
+## Game Dev Web
 
-## Sviluppo
+Integrato negli extension point Frontend:
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+| Entry point | Componente |
+|-------------|------------|
+| `AudioPlayer.waveformSlot` | `WaveformSlot` — forma d'onda seekable |
+| `data-gdw-book-editor` | `BookEditor` — modalità Libro in `/nuovo` |
+| `useActiveJobsPolling` | Backoff 1.5–3s su job `queued`/`running` |
 
-Il dev server Vite (`:5173`) fa proxy di `/api` verso il backend FastAPI su `http://localhost:8765`.
-Auth: cookie httpOnly `tts_session`, `credentials: 'include'`.
-
-## Build
+Export: `src/gameDevWeb.ts`
 
 ```bash
-npm run build
-npm run preview
+npm install && npm run dev && npm run build
 ```
-
-## Schermate
-
-| Path | Schermata |
-|------|-----------|
-| `/login` | Login / Registrazione |
-| `/voci` | Libreria voci |
-| `/nuovo` | Editor testo/libro |
-| `/coda` | Coda job |
-| `/coda/:jobId` | Dettaglio job + player |
-| `/impostazioni` | Account |
-
-## Extension points (Game Dev Web)
-
-- `data-gdw-waveform-container` su `AudioPlayer` — slot per waveform canvas
-- `data-gdw-book-editor` su `NewJobPage` — editor libro avanzato
-- `useJobPolling` / `useActiveJobsPolling` — sostituibili con SSE/WebSocket

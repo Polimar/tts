@@ -5,7 +5,9 @@ import type { JobDetail, JobStatus } from '../types/api'
 export type { JobDetail as Job }
 
 const TERMINAL: JobStatus[] = ['done', 'failed', 'cancelled']
-const DEFAULT_INTERVAL_MS = 3000
+const MIN_POLL_MS = 1500
+const MAX_POLL_MS = 3000
+const DEFAULT_INTERVAL_MS = MAX_POLL_MS
 
 export interface UseJobPollingOptions {
   enabled?: boolean
@@ -53,15 +55,28 @@ export function useJobPolling(
     }
 
     let cancelled = false
-    let timer: ReturnType<typeof setInterval> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let delay = MIN_POLL_MS
+
+    const schedule = () => {
+      timer = setTimeout(() => void poll(), delay)
+      delay = Math.min(Math.round(delay * 1.15), intervalMs)
+    }
 
     const poll = async () => {
-      const data = await getJob(jobId)
-      if (cancelled) return
-      setJob(data)
-      onUpdateRef.current?.(data)
-      if (TERMINAL.includes(data.status)) {
-        if (timer) clearInterval(timer)
+      try {
+        const data = await getJob(jobId)
+        if (cancelled) return
+        setJob(data)
+        onUpdateRef.current?.(data)
+        if (!TERMINAL.includes(data.status)) {
+          schedule()
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Errore nel caricamento del job.')
+          schedule()
+        }
       }
     }
 
@@ -74,7 +89,8 @@ export function useJobPolling(
         setJob(data)
         onUpdateRef.current?.(data)
         if (!TERMINAL.includes(data.status)) {
-          timer = setInterval(() => void poll(), intervalMs)
+          delay = MIN_POLL_MS
+          schedule()
         }
       } catch (err) {
         if (!cancelled) {
@@ -87,7 +103,7 @@ export function useJobPolling(
 
     return () => {
       cancelled = true
-      if (timer) clearInterval(timer)
+      if (timer) clearTimeout(timer)
     }
   }, [jobId, enabled, intervalMs])
 
@@ -95,19 +111,36 @@ export function useJobPolling(
 }
 
 /**
- * Polling per lista job attivi (queued + running).
- * Extension point GDW: centralizzare qui l'aggiornamento della coda.
+ * Polling per lista job attivi (queued + running) con backoff 1.5–3s.
+ * Extension point GDW per la pagina Coda.
  */
 export function useActiveJobsPolling(
   jobs: { status: JobStatus }[],
   onRefresh: () => void,
-  intervalMs = DEFAULT_INTERVAL_MS,
 ) {
+  const onRefreshRef = useRef(onRefresh)
+  onRefreshRef.current = onRefresh
   const hasActive = jobs.some((j) => j.status === 'queued' || j.status === 'running')
 
   useEffect(() => {
     if (!hasActive) return
-    const timer = setInterval(onRefresh, intervalMs)
-    return () => clearInterval(timer)
-  }, [hasActive, onRefresh, intervalMs])
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let delay = MIN_POLL_MS
+
+    const tick = () => {
+      onRefreshRef.current()
+      if (cancelled) return
+      timer = setTimeout(tick, delay)
+      delay = Math.min(Math.round(delay * 1.15), MAX_POLL_MS)
+    }
+
+    timer = setTimeout(tick, delay)
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [hasActive])
 }

@@ -985,6 +985,55 @@ code {
   margin: 0 0 1rem;
 }
 
+/* Waveform slot (GDW) */
+.waveform-slot {
+  position: relative;
+  margin-bottom: 0.5rem;
+}
+
+.waveform-slot__canvas {
+  width: 100%;
+  height: 100px;
+  display: block;
+  cursor: pointer;
+  border-radius: var(--radius);
+  background: var(--color-surface-2);
+}
+
+.waveform-slot__loading {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.waveform-slot--error {
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--color-failed) 15%, transparent);
+  color: var(--color-failed);
+  font-size: 0.875rem;
+}
+
+/* Book editor (GDW) */
+.book-editor__chapter {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.book-editor__chapter-head,
+.book-editor__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-shell {

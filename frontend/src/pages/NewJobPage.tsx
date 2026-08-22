@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { createJob } from '../api/jobs'
 import { listVoices } from '../api/voices'
 import { HttpError } from '../api/client'
+import { BookEditor } from '../components/book/BookEditor'
 import { useToast } from '../components/ToastProvider'
 import type { Voice } from '../types/api'
 
@@ -35,17 +36,6 @@ export function NewJobPage() {
   }, [showToast])
 
   const charCount = text.length
-
-  const handleFileDrop = (file: File) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const content = typeof reader.result === 'string' ? reader.result : ''
-      setText(content)
-      setMode('book')
-      if (!title) setTitle(file.name.replace(/\.[^.]+$/, ''))
-    }
-    reader.readAsText(file)
-  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -97,24 +87,8 @@ export function NewJobPage() {
           </Link>
         </div>
       ) : (
-        <form className="job-editor" onSubmit={(e) => void handleSubmit(e)} data-gdw-book-editor>
-          <div className="job-editor__row">
-            <label className="field field--grow">
-              <span className="field__label">Voce</span>
-              <select
-                className="field__input"
-                value={voiceId}
-                onChange={(e) => setVoiceId(e.target.value)}
-                required
-              >
-                {voices.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
+        <>
+          <div className="job-editor__row" style={{ marginBottom: '1rem' }}>
             <div className="mode-toggle" role="group" aria-label="Modalità editor">
               <button
                 type="button"
@@ -133,75 +107,77 @@ export function NewJobPage() {
             </div>
           </div>
 
-          <label className="field">
-            <span className="field__label">Titolo (opzionale)</span>
-            <input
-              className="field__input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              maxLength={200}
-              placeholder="Es. Capitolo 1"
-            />
-          </label>
-
-          {mode === 'book' && (
-            <div
-              className="drop-zone"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault()
-                const dropped = e.dataTransfer.files[0]
-                if (dropped) handleFileDrop(dropped)
+          {mode === 'book' ? (
+            <BookEditor
+              voices={voices}
+              voiceId={voiceId}
+              onVoiceIdChange={setVoiceId}
+              onJobCreated={(jobId) => {
+                showToast('Job creato con successo.', 'success')
+                navigate(`/coda/${jobId}`)
               }}
-            >
-              <p>Trascina un file di testo (.txt) oppure incolla il contenuto sotto.</p>
-              <label className="btn btn--secondary btn--sm">
-                Scegli file
+              onQueueFull={setQueueFullError}
+              onError={(message) => showToast(message, 'error')}
+            />
+          ) : (
+            <form className="job-editor" onSubmit={(e) => void handleSubmit(e)}>
+              <div className="job-editor__row">
+                <label className="field field--grow">
+                  <span className="field__label">Voce</span>
+                  <select
+                    className="field__input"
+                    value={voiceId}
+                    onChange={(e) => setVoiceId(e.target.value)}
+                    required
+                  >
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="field">
+                <span className="field__label">Titolo (opzionale)</span>
                 <input
-                  type="file"
-                  accept=".txt,text/plain"
-                  hidden
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    if (f) handleFileDrop(f)
-                  }}
+                  className="field__input"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  maxLength={200}
+                  placeholder="Es. Capitolo 1"
                 />
               </label>
-            </div>
+
+              <label className="field">
+                <span className="field__label">Testo da sintetizzare</span>
+                <textarea
+                  className="field__textarea"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  required
+                  maxLength={50000}
+                  rows={8}
+                  placeholder="Scrivi il testo da convertire in audio…"
+                />
+                <span className="field__hint">
+                  {charCount.toLocaleString('it-IT')} / 50.000 caratteri
+                </span>
+              </label>
+
+              <div className="job-editor__actions">
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={submitting || !text.trim() || !voiceId}
+                >
+                  {submitting ? 'Invio in corso…' : 'Genera'}
+                </button>
+              </div>
+            </form>
           )}
-
-          <label className="field">
-            <span className="field__label">
-              {mode === 'book' ? 'Testo del libro' : 'Testo da sintetizzare'}
-            </span>
-            <textarea
-              className="field__textarea"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              required
-              maxLength={50000}
-              rows={mode === 'book' ? 20 : 8}
-              placeholder={
-                mode === 'book'
-                  ? 'Incolla o carica il testo completo del libro…'
-                  : 'Scrivi il testo da convertire in audio…'
-              }
-            />
-            <span className="field__hint">
-              {charCount.toLocaleString('it-IT')} / 50.000 caratteri
-            </span>
-          </label>
-
-          <div className="job-editor__actions">
-            <button
-              type="submit"
-              className="btn btn--primary"
-              disabled={submitting || !text.trim() || !voiceId}
-            >
-              {submitting ? 'Invio in corso…' : 'Genera'}
-            </button>
-          </div>
-        </form>
+        </>
       )}
     </div>
   )

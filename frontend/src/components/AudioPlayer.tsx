@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+export interface AudioWaveformContext {
+  currentTime: number
+  duration: number
+  onSeek: (seconds: number) => void
+  src: string
+}
 
 interface AudioPlayerProps {
   src: string
-  /** Extension point GDW: container per waveform canvas/WebGL */
-  waveformSlot?: React.ReactNode
+  /** Extension point GDW: sostituisce la barra progresso (ReactNode o render con contesto seek). */
+  waveformSlot?: React.ReactNode | ((ctx: AudioWaveformContext) => React.ReactNode)
 }
 
 function formatTime(seconds: number): string {
@@ -43,9 +50,16 @@ export function AudioPlayer({ src, waveformSlot }: AudioPlayerProps) {
   }, [src])
 
   useEffect(() => {
-  const audio = audioRef.current
+    const audio = audioRef.current
     if (audio) audio.playbackRate = playbackRate
   }, [playbackRate])
+
+  const onSeek = useCallback((seconds: number) => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.currentTime = seconds
+    setCurrentTime(seconds)
+  }, [])
 
   const togglePlay = () => {
     const audio = audioRef.current
@@ -60,20 +74,26 @@ export function AudioPlayer({ src, waveformSlot }: AudioPlayerProps) {
   }
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const audio = audioRef.current
-    if (!audio) return
-    const value = Number(e.target.value)
-    audio.currentTime = value
-    setCurrentTime(value)
+    onSeek(Number(e.target.value))
   }
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  const waveformContext: AudioWaveformContext = {
+    currentTime,
+    duration,
+    onSeek,
+    src,
+  }
+
+  const slotContent =
+    typeof waveformSlot === 'function' ? waveformSlot(waveformContext) : waveformSlot
 
   return (
     <div className="audio-player" data-gdw-waveform-container>
       <audio ref={audioRef} src={src} preload="metadata" />
 
-      {waveformSlot ?? (
+      {slotContent ?? (
         <div className="audio-player__progress">
           <div
             className="audio-player__progress-fill"

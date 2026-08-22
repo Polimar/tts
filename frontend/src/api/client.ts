@@ -53,6 +53,20 @@ export async function apiFetch<T>(
   return (await response.json()) as T
 }
 
+/** Download/stream audio WAV autenticato (Range supportato lato server). */
+export async function apiFetchBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(`${API_PREFIX}${path}`, {
+    credentials: 'include',
+    ...init,
+  })
+
+  if (!response.ok) {
+    throw new HttpError(response.status, await parseError(response))
+  }
+
+  return response.blob()
+}
+
 export function audioUrl(jobId: string): string {
   return `${API_PREFIX}/jobs/${jobId}/audio`
 }

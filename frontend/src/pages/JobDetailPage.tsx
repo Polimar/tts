@@ -4,6 +4,7 @@ import { cancelJob } from '../api/jobs'
 import { audioUrl } from '../api/client'
 import { listVoices } from '../api/voices'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { WaveformSlot } from '../components/audio/WaveformSlot'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { StatusChip } from '../components/StatusChip'
 import { useToast } from '../components/ToastProvider'
@@ -175,7 +176,12 @@ export function JobDetailPage() {
       {canPlay && (
         <section className="detail-player">
           <h2>Riproduzione</h2>
-          <AudioPlayer src={audioSrc} />
+          <AudioPlayer
+            src={audioSrc}
+            waveformSlot={(ctx) => (
+              <WaveformSlot jobId={job.id} {...ctx} />
+            )}
+          />
           <div className="detail-player__download">
             <a href={audioSrc} download={`${job.title ?? job.id}.wav`} className="btn btn--secondary">
               Scarica WAV
