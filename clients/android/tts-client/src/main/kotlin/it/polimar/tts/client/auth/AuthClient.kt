@@ -3,25 +3,21 @@ package it.polimar.tts.client.auth
 import it.polimar.tts.client.model.AuthResponse
 import it.polimar.tts.client.model.LoginRequest
 import it.polimar.tts.client.model.RegisterRequest
+import it.polimar.tts.client.model.User
 
 /**
- * Contratto auth allineato a openapi.yaml (PR #3).
+ * Contratto auth allineato a `tts_server/auth/routes.py` (PR #10).
  *
- * Implementazione HTTP (Retrofit/OkHttp, cookie `tts_session`) a carico del Mobile Dev.
- *
- * | Metodo | Path | Success |
- * |--------|------|---------|
- * | register | POST /auth/register | 201 + Set-Cookie |
- * | login | POST /auth/login | 200 + Set-Cookie |
- * | logout | POST /auth/logout | 204 |
- * | me | GET /auth/me | 200 |
+ * - Register richiede header `X-API-Key`
+ * - Sessione: `Authorization: Bearer <token>` (non cookie)
  */
 interface AuthClient {
-    suspend fun register(request: RegisterRequest): AuthResponse
+    suspend fun register(apiKey: String, request: RegisterRequest): AuthResponse
 
     suspend fun login(request: LoginRequest): AuthResponse
 
     suspend fun logout()
 
-    suspend fun me(): AuthResponse
+    /** Restituisce `UserOut` direttamente (non wrappato in AuthResponse). */
+    suspend fun me(): User
 }

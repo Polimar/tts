@@ -1,27 +1,32 @@
 # Client Kotlin per API TTS (Android-compatible)
 
-Modulo libreria **senza UI**: DTO, enum, modelli errore e contratto `AuthClient` allineati a [`openapi.yaml`](https://github.com/Polimar/tts/blob/main/openapi.yaml) (PR #3 Architect).
+Modulo libreria **solo tipi**: DTO, enum, errori e contratto `AuthClient` allineati al **backend live** ([PR #10](https://github.com/Polimar/tts/pull/10) — `tts_server` su `:8765`).
 
-**Mobile Dev** implementa Retrofit/OkHttp (cookie `tts_session`, multipart, Range audio).  
-**Questo modulo** fornisce tipi Kotlin 1:1 con OpenAPI — nessun mapping sorpresa.
+**Mobile Dev** implementa Retrofit/OkHttp. **Questo modulo** fornisce tipi Kotlin 1:1 — nessun mapping sorpresa.
+
+> ⚠️ **Non usare PR #3** (`openapi.yaml` draft): auth, path e campi sono diversi.
 
 ## Source of truth
 
-| File | PR |
-|------|-----|
-| `openapi.yaml` | [#3](https://github.com/Polimar/tts/pull/3) |
-| `docs/API.md` | [#3](https://github.com/Polimar/tts/pull/3) |
-| `docs/ARCHITECTURE.md` | [#3](https://github.com/Polimar/tts/pull/3) |
+| Risorsa | PR |
+|---------|-----|
+| `tts_server/schemas.py` | [#10](https://github.com/Polimar/tts/pull/10) |
+| `tests/test_api.py` | [#10](https://github.com/Polimar/tts/pull/10) |
 
-## Hard lock (API v1)
+## Contratto live (hard lock)
 
-- Cookie sessione: **`tts_session`** (httpOnly, non Bearer)
-- Prefisso: **`/api/v1`**, JSON **snake_case**
-- Errori: `{ "code", "detail" }` (italiano, `code` stabile → enum `ErrorCode`)
-- Coda FIFO: max **10** `queued`, **1** `running` → `POST /jobs` → **409** `queue_full`
-- Audio: `GET /jobs/{job_id}/audio` autenticato, WAV, supporto **Range** (200/206)
-- Voci server-side: `data/users/<id>/voices`
-- `job.status`: `queued` \| `running` \| `done` \| `failed` \| `cancelled`
+| Aspetto | Valore |
+|---------|--------|
+| Base URL | `http://<host>:8765` — **nessun** `/api/v1` |
+| Auth login | `POST /auth/login` — `{username, password}` |
+| Auth register | `POST /auth/register` + header **`X-API-Key`** |
+| Sessione | **`Authorization: Bearer <token>`** (non cookie `tts_session`) |
+| `GET /auth/me` | restituisce **`User`** diretto (non `AuthResponse`) |
+| Voci multipart | `name`, `ref_text`, `language`, `audio` |
+| Job create | `{voice_id, text, language?}` (default `"Italian"`) |
+| Job status | `queued` \| `running` \| **`completed`** \| `failed` (no `cancelled`) |
+| Download audio | `GET /jobs/{id}/download/wav` o `/download/mp3` |
+| Errori | `{"detail": "<string>"}` (FastAPI — **no** `code`) |
 
 ## Compilazione
 
@@ -30,117 +35,64 @@ cd clients/android
 ./gradlew :tts-client:build
 ```
 
-Requisiti: JDK 21+ (o 17+ con toolchain Gradle).
-
-## Dipendenze esportate
-
-- `kotlinx-serialization-json`
-- `kotlinx-coroutines-core` (per `AuthClient` suspend)
-
-Nessuna dipendenza OkHttp/Retrofit — a carico del Mobile Dev.
-
 ## Uso tipi
 
 ```kotlin
+import it.polimar.tts.client.TtsApiConstants
 import it.polimar.tts.client.TtsJson
 import it.polimar.tts.client.model.AuthResponse
 import it.polimar.tts.client.model.CreateJobRequest
-import it.polimar.tts.client.model.SourceType
 
-val auth = TtsJson.decodeFromString<AuthResponse>(responseBody)
+val baseUrl = TtsApiConstants.baseUrl("http://10.0.2.2:8765")
+val authHeader = TtsApiConstants.bearerToken(token)
 
-val jobRequest = CreateJobRequest(
-    voiceId = voiceId,
-    sourceType = SourceType.TEXT,
-    text = "C'era una volta...",
-    title = "Capitolo 1",
-)
-val jsonBody = TtsJson.encodeToString(jobRequest)
+val job = TtsJson.decodeFromString<Job>(responseBody)
 ```
 
 ## AuthClient (interfaccia)
 
 ```kotlin
-import it.polimar.tts.client.TtsApiConstants
-import it.polimar.tts.client.auth.AuthClient
-
-// Cookie da inviare su ogni richiesta autenticata:
-TtsApiConstants.SESSION_COOKIE_NAME // "tts_session"
-
-// Path relativi a baseUrl = http://<host>:8765/api/v1
-TtsApiConstants.Paths.AUTH_LOGIN    // /auth/login
-```
-
-| Metodo | HTTP | Success |
-|--------|------|---------|
-| `register` | POST `/auth/register` | **201** + `Set-Cookie: tts_session=...` |
-| `login` | POST `/auth/login` | **200** + cookie |
-| `logout` | POST `/auth/logout` | **204** |
-| `me` | GET `/auth/me` | **200** `AuthResponse` |
-
-## Modelli principali
-
-| Kotlin | OpenAPI schema |
-|--------|----------------|
-| `AuthResponse` | `AuthResponse` |
-| `User` | `User` |
-| `Voice` / `VoiceListResponse` | `Voice` / `VoiceListResponse` |
-| `Job` / `JobDetail` / `JobListResponse` | `Job` / `JobDetail` / `JobListResponse` |
-| `JobCancelled` | `JobCancelled` |
-| `CreateJobRequest` | `CreateJobRequest` |
-| `ApiError` + `ErrorCode` | `Error` + `ErrorCode` |
-| `JobStatus` | `JobStatus` |
-| `SourceType` | `SourceType` |
-
-## Upload voce (multipart — implementazione Mobile Dev)
-
-Campi form (vedi `TtsApiConstants.VoiceMultipart`):
-
-| Campo | Obbligatorio |
-|-------|--------------|
-| `name` | sì |
-| `reference_audio` | sì (WAV/MP3/MP4/M4A, max 20 MB) |
-
-## Audio Range
-
-```kotlin
-TtsApiConstants.Audio.rangeBytes(0L..1023L) // "bytes=0-1023"
-// Header: Range: bytes=0-1023
-// Risposta attesa: 206 + Content-Range
-```
-
-## Errori
-
-```kotlin
-import it.polimar.tts.client.TtsErrorParser
-import it.polimar.tts.client.TtsApiException
-
-val apiError = TtsErrorParser.parse(errorBody)
-// apiError?.code == ErrorCode.QUEUE_FULL
-```
-
-## Integrazione Gradle (app Android)
-
-```kotlin
-// settings.gradle.kts
-include(":tts-client")
-project(":tts-client").projectDir = file("../clients/android/tts-client")
-
-// app/build.gradle.kts
-dependencies {
-    implementation(project(":tts-client"))
+interface AuthClient {
+    suspend fun register(apiKey: String, request: RegisterRequest): AuthResponse  // 201
+    suspend fun login(request: LoginRequest): AuthResponse                        // 200
+    suspend fun logout()                                                          // 204
+    suspend fun me(): User                                                          // 200
 }
 ```
 
-Per HTTP cleartext verso `http://` in debug: Network Security Config / `usesCleartextTraffic`.
+## Modelli principali
 
-## Package
+| Kotlin | Backend Python |
+|--------|----------------|
+| `User` | `UserOut` |
+| `AuthResponse` | `AuthResponse` (`token`, `expires_at`, `user`) |
+| `Voice` / `VoiceList` | `VoiceOut` / `list[VoiceOut]` |
+| `Job` / `JobList` | `JobOut` / `list[JobOut]` |
+| `CreateJobRequest` | `JobCreateRequest` |
+| `JobStatus` | `Literal["queued","running","completed","failed"]` |
+| `ApiError` | `HTTPException` → `{"detail": "..."}` |
+| `HealthResponse` | `HealthOut` |
+| `DeviceInfo` | `DeviceInfoOut` |
 
+## Multipart voce
+
+```kotlin
+TtsApiConstants.VoiceMultipart.FIELD_NAME       // "name"
+TtsApiConstants.VoiceMultipart.FIELD_REF_TEXT   // "ref_text"
+TtsApiConstants.VoiceMultipart.FIELD_LANGUAGE   // "language"
+TtsApiConstants.VoiceMultipart.FIELD_AUDIO      // "audio"
 ```
-it.polimar.tts.client
-  TtsApiConstants, TtsJson, TtsErrorParser, TtsApiException
-it.polimar.tts.client.auth
-  AuthClient
-it.polimar.tts.client.model
-  * (tutti i DTO)
+
+## Download audio
+
+```kotlin
+TtsApiConstants.Paths.jobDownloadWav(jobId)  // /jobs/{id}/download/wav
+TtsApiConstants.Paths.jobDownloadMp3(jobId)  // /jobs/{id}/download/mp3
+```
+
+## Integrazione Gradle
+
+```kotlin
+include(":tts-client")
+project(":tts-client").projectDir = file("../clients/android/tts-client")
 ```

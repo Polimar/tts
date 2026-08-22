@@ -1,16 +1,15 @@
 package it.polimar.tts.client
 
 import it.polimar.tts.client.model.ApiError
-import it.polimar.tts.client.model.ErrorCode
 
 /**
- * Eccezione per risposte HTTP 4xx/5xx con corpo `{code, detail}`.
+ * Eccezione per risposte HTTP 4xx/5xx.
  *
- * Mobile Dev può mappare [apiError] da Retrofit/OkHttp usando [TtsJson].
+ * Il backend live (PR #10) espone `{"detail": "..."}` — non `{code, detail}`.
  */
 class TtsApiException(
     val apiError: ApiError,
     val httpStatus: Int,
 ) : Exception(apiError.detail) {
-    val code: ErrorCode get() = apiError.code
+    val detail: String get() = apiError.detail
 }
