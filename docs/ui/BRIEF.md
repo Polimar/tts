@@ -70,7 +70,7 @@ Webapp per clonazione vocale locale e sintesi TTS in italiano. Ogni utente ha vo
 
 - Vista **griglia** (desktop) / **lista** (mobile)
 - CTA primaria: **Nuova voce**
-- Empty state: copy documentato + **slot illustrazione** (2D Artist)
+- **Empty state (2D lock):** illustrazione microfono vuoto + CTA **Carica audio**
 
 ### Card voce
 
@@ -164,9 +164,13 @@ Webapp per clonazione vocale locale e sintesi TTS in italiano. Ogni utente ha vo
 
 Usato quando un turno dialogo referenzia una **voce mancante** o non pronta.
 
-- **Mai** fallback silenzioso
-- UI mostra: personaggio/voce mancante
+- **Mai** fallback silenzioso; senza voce → **impossibile generare**
+- UI: **badge ambra** «Bloccato» + personaggio/voce mancante — **nessuna illustrazione** empty-state
 - CTA: **Apri voce** (deep link a `/voci`) o **Rimuovi turno** (se API lo consente)
+
+### Empty state (2D lock)
+
+Lista vuota: illustrazione lista vuota + CTA **Nuovo job** → `/nuovo`
 
 ### Interazione riga
 
@@ -214,8 +218,9 @@ Formato default pre-selezionato da Impostazioni utente.
 |---------|-------|
 | Account | Email (read-only), **Cambia password** |
 | Export | Formato default: WAV / MP3 |
-| Dialoghi | Gap default visualizzato **350 ms** (read-only finché Sound non fissa) |
 | Lingua | IT only (v1, nessun selettore) |
+
+**Nota (Game Designer lock):** il gap dialoghi **350 ms** è costante di prodotto — **non** compare in Impostazioni (né v1 né v1.1). Modificabile solo per-turno nell'editor (0–1500 ms).
 
 ---
 
@@ -229,16 +234,22 @@ Formato default pre-selezionato da Impostazioni utente.
 | Entità | Definizione |
 |--------|-------------|
 | **Dialogo** | Lista ordinata di **turni** |
-| **Turno** | `characterId`, `text`, override opzionali: pre/post pause, speed, volume |
+| **Turno** | `characterId`, `text`, override opzionali: pre/post pause, speed, volume, **gap** (0–1500 ms; default costante **350 ms**) |
 | **Personaggio** | Config (non asset): voce già clonata + nome display + colore UI + speed/pitch default |
-| **Job dialogo** | N job TTS (1 turno = 1 chunk) → concat WAV in ordine, gap default **350 ms** (override per turno 0–1500 ms) |
+| **Job dialogo** | N job TTS (1 turno = 1 chunk) → concat WAV in ordine; gap stitch = **350 ms** (costante prodotto, editabile solo per-turno) |
 
 ### Regole invarianti
 
-- **Nessuna voce nel dialogo senza clone pronto** — turno → stato **Bloccato** in coda
+- **Nessuna voce nel dialogo senza clone pronto** — turno resta **Bloccato** in coda; **Genera tutto** disabilitato
 - **Nessun fallback silenzioso**
+- Dialoghi senza voci pronte → empty state con CTA **Vai alle voci** (`/voci`), non generazione
 - Libri restano job **mono-voce**; i dialoghi sono **multi-voce**
 - Cap: **8** personaggi, **40** turni, **4000** caratteri/turno (hard block UI)
+- Gap **350 ms**: costante di prodotto (Game Designer); **solo** override per-turno 0–1500 ms nell'editor — mai in Impostazioni
+
+### Empty state (2D lock)
+
+Illustrazione due balloon + CTA **Vai alle voci** → `/voci`. Badge **v1.1** solo in nav, **non** sull'empty state.
 
 ### UI — Character manager
 
@@ -290,7 +301,7 @@ Avatar opzionale per personaggio nel character manager e nell'editor turni. Il *
 | Espressione | Neutra, bocca chiusa |
 | Set predefinito (6) | **Neutro** · **Uomo** · **Donna** · **Bambino** · **Anziano** · **Custom** |
 | Variante Custom | Silhouette + plus / volto geometrico, stesso peso visivo del set |
-| Colore accent | Evitare riempimenti ampi di `#C45C26` sul busto |
+| Colore accent | Evitare riempimenti ampi di `#0F766E` sul busto |
 | Placeholder | Stesso crop/cerchio, fill `#D9D3C8` (nessun asset) |
 
 Selezione avatar: picker griglia nel character manager; default **Neutro** alla creazione personaggio.
@@ -299,7 +310,17 @@ Selezione avatar: picker griglia nel character manager; default **Neutro** alla 
 
 ## Gerarchia visiva e stati
 
-**Token colore (lock Frontend + 2D):** bg `#F7F4EF` · ink `#1C1916` · muted `#8A8378` · surface `#FFFDF9` · accent `#C45C26`
+**Token colore (lock Frontend + 2D):** bg `#F7F4EF` · ink `#1C1916` · muted `#8A8378` · surface `#FFFDF9` · accent/teal `#0F766E`
+
+### Identità visiva (2D lock)
+
+| Asset | Specifica |
+|-------|-----------|
+| Sfondo app | Cream `#F7F4EF` |
+| Accent | Teal `#0F766E` (sostituisce qualsiasi riferimento arancione precedente) |
+| Icone | Linea **2 px**, stile coerente con logo |
+| Logo | Palloncino + waveform |
+| Favicon | Pulse bianco su tile teal `#0F766E` |
 
 | Principio | Implementazione |
 |-----------|-----------------|
@@ -308,15 +329,17 @@ Selezione avatar: picker griglia nel character manager; default **Neutro** alla 
 | Loading liste | Skeleton |
 | Loading job | Progress determinato |
 | Errori | Toast + inline (campo o job) |
-| Empty states | Copy + slot illustrazione (2D Artist: logo, favicon, icon set, empty states) |
+| Empty states | Voci: mic → **Carica audio** · Coda: lista vuota → **Nuovo job** · Dialoghi: due balloon → **Vai alle voci** (badge v1.1 solo in nav) |
+| Bloccato in coda | **Solo badge ambra** — non è uno empty state illustrato |
 
-### Palette semantica stati (senza hex — 2D definisce token)
+### Palette semantica stati
 
 | Stato | Uso |
 |-------|-----|
 | Successo / Pronta / Completato | Chip verde |
 | In corso | Chip/blu o animazione |
-| Errore / Bloccato | Chip rosso + messaggio esplicativo |
+| Errore | Chip rosso + messaggio esplicativo |
+| **Bloccato** | **Badge ambra** + messaggio (voce mancante); no illustrazione |
 | Neutro / In coda | Chip grigio |
 
 ---
@@ -336,9 +359,9 @@ Target primario: **workstation locale Windows** (Arc GPU).
 
 | Team | Cosa consuma da questo brief | Cosa fornisce al Frontend |
 |------|-------------------------------|---------------------------|
-| **Sound Designer** | Upload constraints, chunking UI, gap 350 ms | Formati audio, max durata, loudness, regole chunk libro, API progress |
-| **2D Artist** | Empty states, badge v1.1, icon set | Asset illustrazioni, logo, favicon |
-| **Game Designer** | Contratto dialoghi, caps, export ZIP | Schema turno/personaggio, stitch rules |
+| **Sound Designer** | Upload constraints, chunking UI | Formati audio, max durata, loudness, regole chunk libro, API progress |
+| **2D Artist** | Empty states lock, identità visiva, badge v1.1, icon set 2 px | Logo (balloon+waveform), favicon, illustrazioni empty, avatar busti |
+| **Game Designer** | Contratto dialoghi, gap 350 ms costante, caps, export ZIP | Schema turno/personaggio, stitch rules, gap per-turno 0–1500 ms |
 | **Backend** | Auth, job states, file download | OpenAPI o equivalente per stati job/voce |
 
 ---
@@ -373,3 +396,4 @@ Target primario: **workstation locale Windows** (Arc GPU).
 |------|----------|------|
 | 2026-08-22 | 1.0 | Prima stesura; repo senza UI esistente |
 | 2026-08-22 | 1.1 | Avatar/busti personaggio v1.1 + token colore lock |
+| 2026-08-22 | 1.2 | Design room: identità teal, empty states lock, gap 350 ms fuori Impostazioni |
