@@ -23,11 +23,11 @@
 
 ## Avatar personaggi
 
-- **Formato:** PNG **512×512**, mostrato come cerchio in UI.
-- **Inquadratura:** busto (testa + spalle). Volto e spalle dentro area circolare safe; ~**8%** margine ai bordi del quadrato per crop sicuro.
+- **Sorgente:** PNG **512×512**. Busto (testa + spalle) con ~**8%** margine circle-safe; in UI si applica **mask cerchio CSS** — non si consegna solo un PNG già ritagliato a cerchio.
+- **Display:** chip lista **32/40 px**; editor/dettaglio **64/96 px** (cerchio).
 - **Stile:** stessa palette (teal/cream/ink). Flat editorial, no fotoreal, no mascotte.
-- **Uso:** chip UI per **Personaggio** (display) — non sono asset voce. Senza busto custom: fallback = **iniziali su cerchio teal** (non volto vuoto).
-- **Scala:** max **8 personaggi** in v1.1; in lista/editor colonna si vedono a **32/40 px** cerchio — 512 px è solo sorgente.
+- **Uso:** chip UI per **Personaggio** (display) — non sono asset voce. Max **8 personaggi** in v1.1.
+- **Fallback:** iniziali su cerchio `#0F766E` — nessun placeholder volto vuoto.
 
 ## Empty states — solo questi tre (richiesta UI Designer)
 
