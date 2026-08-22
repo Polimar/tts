@@ -3,11 +3,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
-from app.auth.dependencies import get_current_user_id
-from app.config import get_settings
-from app.db.database import get_db
-from app.schemas import JobCreateRequest, JobOut
-from app.services.security import new_id, resolve_under, validate_safe_segment
+from tts_server.auth.dependencies import get_current_user_id
+from tts_server.config import settings
+from tts_server.db.database import get_db
+from tts_server.schemas import JobCreateRequest, JobOut
+from tts_server.services.security import new_id, resolve_under, validate_safe_segment
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -32,11 +32,10 @@ def _job_to_out(job: dict) -> JobOut:
 
 @router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 def create_job(body: JobCreateRequest, user_id: str = Depends(get_current_user_id)) -> JobOut:
-    settings = get_settings()
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Text required")
-    if len(text) > settings.tts_max_text_chars:
+    if len(text) > settings.max_text_chars:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Text exceeds limit")
 
     db = get_db()
@@ -79,7 +78,6 @@ def download_job(
     format: str,
     user_id: str = Depends(get_current_user_id),
 ) -> FileResponse:
-    settings = get_settings()
     try:
         validate_safe_segment(job_id, "job_id")
     except ValueError:

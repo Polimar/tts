@@ -7,11 +7,11 @@ from typing import Any, Literal, Optional
 
 import numpy as np
 
-from app.config import get_settings
-from app.db.database import get_db
-from app.services.audio import concatenate_chunks, mock_synthesis, write_mp3_from_wav, write_wav
-from app.services.chunking import chunk_text
-from app.services.security import job_export_path, resolve_under
+from tts_server.config import settings
+from tts_server.db.database import get_db
+from tts_server.services.audio import concatenate_chunks, mock_synthesis, write_mp3_from_wav, write_wav
+from tts_server.services.chunking import chunk_text
+from tts_server.services.security import job_export_path, resolve_under
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class WorkerInfo:
     device: DeviceChoice
     model_id: str
     xpu_gate_passed: bool
+    xpu_gate_reason: str
     xpu_memory_bytes: int
     cpu_warmup_seconds: float
     xpu_warmup_seconds: Optional[float]
@@ -43,7 +44,7 @@ def _ensure_warmup_reference(path: Path) -> Path:
 
 
 class Qwen3Worker:
-    """Qwen3-TTS 0.6B Base synthesis worker with startup XPU gate."""
+    """Qwen3-TTS 0.6B Base worker. CPU default; XPU only after full-generate gate passes."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -61,19 +62,19 @@ class Qwen3Worker:
         return self._initialized
 
     def initialize(self) -> WorkerInfo:
-        settings = get_settings()
-        if settings.tts_mock_worker:
+        if settings.mock_worker:
             self._info = WorkerInfo(
                 device="cpu",
                 model_id=settings.model_path,
                 xpu_gate_passed=False,
+                xpu_gate_reason="mock_worker",
                 xpu_memory_bytes=0,
                 cpu_warmup_seconds=0.0,
                 xpu_warmup_seconds=None,
             )
             self._device = "cpu"
             self._initialized = True
-            logger.info("Mock worker initialized (no Qwen3 model loaded)")
+            logger.info("XPU gate: SKIPPED (MOCK_WORKER=1) -> device=cpu")
             return self._info
 
         import torch
@@ -82,63 +83,77 @@ class Qwen3Worker:
         model_path = settings.model_path
         logger.info("Loading Qwen3-TTS model from %s", model_path)
 
-        dtype = torch.bfloat16
         model = Qwen3TTSModel.from_pretrained(
             model_path,
             device_map="cpu",
-            dtype=dtype,
+            dtype=torch.bfloat16,
         )
 
-        warmup_ref = _ensure_warmup_reference(settings.tts_data_dir / "warmup" / "reference.wav")
+        warmup_ref = _ensure_warmup_reference(settings.data_dir / "warmup" / "reference.wav")
         warmup_ref_text = "Questo è un breve campione di riferimento per il warmup."
 
         cpu_time = self._benchmark_synthesis(
             model,
             device="cpu",
-            text=settings.tts_warmup_text,
+            text=settings.warmup_text,
             ref_audio=warmup_ref,
             ref_text=warmup_ref_text,
         )
+        if cpu_time == float("inf"):
+            logger.error("CPU warmup generate failed; worker may be unstable")
 
-        xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
         xpu_memory = 0
         xpu_time: Optional[float] = None
         xpu_gate_passed = False
+        gate_reason = "TTS_DEVICE=cpu (default)"
         chosen: DeviceChoice = "cpu"
 
-        if xpu_available:
+        xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
+        if settings.tts_device == "xpu" and xpu_available:
+            gate_reason = "evaluating"
             try:
                 model.model = model.model.to("xpu")
                 xpu_memory = int(torch.xpu.memory_allocated())
-                if xpu_memory > 0:
+                if xpu_memory <= 0:
+                    gate_reason = "xpu memory_allocated=0 after to('xpu')"
+                    model.model = model.model.to("cpu")
+                    logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+                else:
                     xpu_time = self._benchmark_synthesis(
                         model,
                         device="xpu",
-                        text=settings.tts_warmup_text,
+                        text=settings.warmup_text,
                         ref_audio=warmup_ref,
                         ref_text=warmup_ref_text,
                     )
-                    if xpu_time < cpu_time:
-                        xpu_gate_passed = True
-                        chosen = "xpu"
-                    else:
-                        logger.warning(
-                            "XPU slower than CPU (xpu=%.2fs cpu=%.2fs); falling back to CPU",
-                            xpu_time,
-                            cpu_time,
+                    if xpu_time == float("inf"):
+                        gate_reason = (
+                            "full generate warmup failed on XPU "
+                            "(likely CPU/XPU tensor mismatch in qwen-tts)"
                         )
                         model.model = model.model.to("cpu")
-                else:
-                    logger.warning("XPU memory_allocated is 0 after to('xpu'); falling back to CPU")
-                    model.model = model.model.to("cpu")
+                        logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+                    elif xpu_time >= cpu_time:
+                        gate_reason = f"XPU slower than CPU (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
+                        model.model = model.model.to("cpu")
+                        logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+                    else:
+                        xpu_gate_passed = True
+                        gate_reason = f"passed (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
+                        chosen = "xpu"
+                        logger.info("XPU gate: PASSED %s -> device=xpu", gate_reason)
             except Exception as exc:
-                logger.warning("XPU initialization failed: %s; falling back to CPU", exc)
+                gate_reason = f"XPU setup error: {exc}"
                 try:
                     model.model = model.model.to("cpu")
                 except Exception:
                     pass
+                logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+        elif settings.tts_device == "xpu" and not xpu_available:
+            gate_reason = "torch.xpu not available"
+            logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
         else:
-            logger.info("torch.xpu not available; using CPU")
+            logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
 
         self._model = model
         self._device = chosen
@@ -146,12 +161,19 @@ class Qwen3Worker:
             device=chosen,
             model_id=model_path,
             xpu_gate_passed=xpu_gate_passed,
+            xpu_gate_reason=gate_reason,
             xpu_memory_bytes=xpu_memory,
             cpu_warmup_seconds=cpu_time,
             xpu_warmup_seconds=xpu_time,
         )
         self._initialized = True
-        logger.info("Worker ready on device=%s xpu_gate=%s", chosen, xpu_gate_passed)
+        logger.info(
+            "Worker ready device=%s model=%s xpu_gate_passed=%s reason=%s",
+            chosen,
+            model_path,
+            xpu_gate_passed,
+            gate_reason,
+        )
         return self._info
 
     def _benchmark_synthesis(
@@ -187,7 +209,7 @@ class Qwen3Worker:
                     voice_clone_prompt=prompt,
                 )
         except Exception as exc:
-            logger.warning("Warmup synthesis on %s failed: %s", device, exc)
+            logger.warning("Warmup generate on %s failed: %s", device, exc)
             return float("inf")
         return time.perf_counter() - start
 
@@ -199,8 +221,7 @@ class Qwen3Worker:
         ref_text: str,
         voice_prompt: Any,
     ) -> tuple[np.ndarray, int, Any]:
-        settings = get_settings()
-        if settings.tts_mock_worker:
+        if settings.mock_worker:
             audio, sr = mock_synthesis(duration_seconds=min(2.0, max(0.5, len(text) / 80.0)))
             return audio, sr, voice_prompt
 
@@ -208,17 +229,43 @@ class Qwen3Worker:
             raise RuntimeError("Worker not initialized")
 
         with self._lock:
-            if voice_prompt is None:
-                voice_prompt = self._model.create_voice_clone_prompt(
-                    ref_audio=str(ref_audio_path),
-                    ref_text=ref_text,
-                    x_vector_only_mode=False,
+            try:
+                if voice_prompt is None:
+                    voice_prompt = self._model.create_voice_clone_prompt(
+                        ref_audio=str(ref_audio_path),
+                        ref_text=ref_text,
+                        x_vector_only_mode=False,
+                    )
+                wavs, sr = self._model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=voice_prompt,
                 )
-            wavs, sr = self._model.generate_voice_clone(
-                text=text,
-                language=language,
-                voice_clone_prompt=voice_prompt,
-            )
+            except Exception as exc:
+                if self._device == "xpu":
+                    logger.warning(
+                        "XPU synthesis failed (%s); fail-closed retry on CPU", exc
+                    )
+                    import torch
+
+                    self._model.model = self._model.model.to("cpu")
+                    self._device = "cpu"
+                    if self._info:
+                        self._info.device = "cpu"
+                        self._info.xpu_gate_passed = False
+                        self._info.xpu_gate_reason = f"runtime fail-closed: {exc}"
+                    voice_prompt = self._model.create_voice_clone_prompt(
+                        ref_audio=str(ref_audio_path),
+                        ref_text=ref_text,
+                        x_vector_only_mode=False,
+                    )
+                    wavs, sr = self._model.generate_voice_clone(
+                        text=text,
+                        language=language,
+                        voice_clone_prompt=voice_prompt,
+                    )
+                else:
+                    raise
             audio = np.asarray(wavs[0], dtype=np.float32)
             return audio, sr, voice_prompt
 
@@ -234,13 +281,18 @@ def get_worker() -> Qwen3Worker:
 
 
 class JobQueue:
-    """Serial GPU/XPU job queue — one synthesis at a time."""
+    """Serial inference queue — one synthesis job at a time on the active device."""
 
     def __init__(self) -> None:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
 
     def start(self) -> None:
+        if settings.gpu_queue_workers != 1:
+            logger.warning(
+                "GPU_QUEUE_WORKERS=%s; only one serial worker is supported",
+                settings.gpu_queue_workers,
+            )
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -253,18 +305,16 @@ class JobQueue:
             self._thread.join(timeout=5)
 
     def _run(self) -> None:
-        settings = get_settings()
         db = get_db()
         worker = get_worker()
         while not self._stop.is_set():
             job = db.claim_next_queued_job()
             if not job:
-                time.sleep(settings.tts_queue_poll_seconds)
+                time.sleep(settings.queue_poll_seconds)
                 continue
             self._process_job(job, worker, db)
 
     def _process_job(self, job: dict[str, Any], worker: Qwen3Worker, db: Any) -> None:
-        settings = get_settings()
         job_id = job["id"]
         user_id = job["user_id"]
         voice_id = job["voice_id"]
@@ -281,7 +331,7 @@ class JobQueue:
                 db.update_job(job_id, status="failed", error="Reference audio missing", completed=True)
                 return
 
-            chunks = chunk_text(job["text"], settings.tts_chunk_max_chars)
+            chunks = chunk_text(job["text"], settings.chunk_max_chars)
             if not chunks:
                 db.update_job(job_id, status="failed", error="Empty text", completed=True)
                 return

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-from app.auth.dependencies import get_current_user_id
-from app.config import get_settings
-from app.db.database import get_db
-from app.schemas import VoiceOut
-from app.services.security import (
+from tts_server.auth.dependencies import get_current_user_id
+from tts_server.config import settings
+from tts_server.db.database import get_db
+from tts_server.schemas import VoiceOut
+from tts_server.services.security import (
     ALLOWED_AUDIO_EXTENSIONS,
+    is_allowed_audio_mime,
     new_id,
     rel_to_users_dir,
     sanitize_filename,
@@ -25,7 +26,6 @@ async def create_voice(
     audio: UploadFile = File(...),
     user_id: str = Depends(get_current_user_id),
 ) -> VoiceOut:
-    settings = get_settings()
     if not name.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name required")
     if not ref_text.strip():
@@ -38,9 +38,14 @@ async def create_voice(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported audio format. Allowed: {sorted(ALLOWED_AUDIO_EXTENSIONS)}",
         )
+    if not is_allowed_audio_mime(audio.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported audio MIME type: {audio.content_type}",
+        )
 
     content = await audio.read()
-    if len(content) > settings.tts_max_upload_bytes:
+    if len(content) > settings.max_upload_bytes:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Upload too large")
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty upload")
@@ -85,6 +90,11 @@ def list_voices(user_id: str = Depends(get_current_user_id)) -> list[VoiceOut]:
 
 @router.get("/{voice_id}", response_model=VoiceOut)
 def get_voice(voice_id: str, user_id: str = Depends(get_current_user_id)) -> VoiceOut:
+    try:
+        validate_safe_segment(voice_id, "voice_id")
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid voice id")
+
     voice = get_db().get_voice(voice_id, user_id)
     if not voice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice not found")
@@ -104,7 +114,6 @@ def delete_voice(voice_id: str, user_id: str = Depends(get_current_user_id)) -> 
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid voice id")
 
-    settings = get_settings()
     if not get_db().delete_voice(voice_id, user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice not found")
 

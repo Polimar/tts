@@ -1,15 +1,35 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
-from app.auth.dependencies import bearer_scheme, get_current_user_id
-from app.db.database import get_db
-from app.schemas import AuthResponse, LoginRequest, RegisterRequest, UserOut
-from app.services.security import hash_password, new_id, new_token, token_expiry, verify_password
+from tts_server.auth.dependencies import bearer_scheme, get_current_user_id, verify_api_key
+from tts_server.config import settings
+from tts_server.db.database import get_db
+from tts_server.schemas import AuthResponse, LoginRequest, RegisterRequest, UserOut
+from tts_server.services.rate_limit import SlidingWindowRateLimiter
+from tts_server.services.security import hash_password, new_id, new_token, token_expiry, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+_login_limiter = SlidingWindowRateLimiter(
+    max_events=settings.login_rate_limit_per_minute,
+    window_seconds=60.0,
+)
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest) -> AuthResponse:
+def register(
+    body: RegisterRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> AuthResponse:
+    verify_api_key(x_api_key)
     db = get_db()
     if db.get_user_by_username(body.username):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
@@ -28,7 +48,13 @@ def register(body: RegisterRequest) -> AuthResponse:
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(body: LoginRequest) -> AuthResponse:
+def login(body: LoginRequest, request: Request) -> AuthResponse:
+    if not _login_limiter.allow(_client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts; try again later",
+        )
+
     db = get_db()
     user = db.get_user_by_username(body.username)
     if not user or not verify_password(body.password, user["password_hash"]):

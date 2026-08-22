@@ -65,12 +65,14 @@ class HealthOut(BaseModel):
     device: Optional[str] = None
     model_id: Optional[str] = None
     xpu_gate_passed: Optional[bool] = None
+    xpu_gate_reason: Optional[str] = None
 
 
 class DeviceInfoOut(BaseModel):
     device: str
     model_id: str
     xpu_gate_passed: bool
+    xpu_gate_reason: str
     xpu_memory_bytes: int
     cpu_warmup_seconds: float
     xpu_warmup_seconds: Optional[float] = None

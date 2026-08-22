@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator, Optional
 
-from app.config import get_settings
+from tts_server.config import settings
 
 
 def utcnow() -> datetime:
@@ -290,8 +290,6 @@ _db: Optional[Database] = None
 def get_db() -> Database:
     global _db
     if _db is None:
-        settings = get_settings()
-        settings.tts_data_dir.mkdir(parents=True, exist_ok=True)
-        settings.users_dir.mkdir(parents=True, exist_ok=True)
+        settings.ensure_data_dir()
         _db = Database(settings.db_path)
     return _db

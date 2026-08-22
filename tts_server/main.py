@@ -3,27 +3,22 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import api_router
-from app.config import get_settings
-from app.worker.qwen3_worker import get_job_queue, get_worker
+from tts_server.api import api_router
+from tts_server.config import settings
+from tts_server.worker.qwen3_worker import get_job_queue, get_worker
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
-    settings.tts_data_dir.mkdir(parents=True, exist_ok=True)
-    settings.users_dir.mkdir(parents=True, exist_ok=True)
-
+    settings.ensure_data_dir()
     worker = get_worker()
     worker.initialize()
     queue = get_job_queue()
     queue.start()
-    logger.info("TTS service started on %s:%s", settings.tts_host, settings.tts_port)
-
+    logger.info("TTS service started on %s:%s", settings.host, settings.port)
     yield
-
     queue.stop()
 
 

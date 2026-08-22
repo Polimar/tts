@@ -7,13 +7,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ["TTS_MOCK_WORKER"] = "1"
-os.environ["TTS_DATA_DIR"] = "/tmp/tts-test-data"
-os.environ["TTS_SECRET_KEY"] = "test-secret-key"
-os.environ["TTS_QUEUE_POLL_SECONDS"] = "0.1"
+os.environ["MOCK_WORKER"] = "1"
+os.environ["DATA_DIR"] = "/tmp/tts-test-data"
+os.environ["JWT_SECRET"] = "test-jwt-secret"
+os.environ["API_KEY"] = "test-api-key"
+os.environ["QUEUE_POLL_SECONDS"] = "0.1"
 
-from app.config import get_settings
-from app.main import create_app
+from tts_server.config import settings
+from tts_server.main import create_app
 
 
 def _make_wav_bytes(duration: float = 0.5, sample_rate: int = 24000) -> bytes:
@@ -29,8 +30,11 @@ def _make_wav_bytes(duration: float = 0.5, sample_rate: int = 24000) -> bytes:
 
 @pytest.fixture()
 def client(tmp_path: Path):
-    os.environ["TTS_DATA_DIR"] = str(tmp_path / "data")
-    get_settings.cache_clear()
+    os.environ["DATA_DIR"] = str(tmp_path / "data")
+    # Reload settings singleton for isolated data dir
+    from tts_server import config as config_module
+
+    config_module.settings = config_module.Settings()
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
@@ -39,18 +43,32 @@ def client(tmp_path: Path):
 def _register(client: TestClient, username: str = "alice") -> str:
     resp = client.post(
         "/auth/register",
+        headers={"X-API-Key": os.environ["API_KEY"]},
         json={"username": username, "password": "password123"},
     )
     assert resp.status_code == 201
     return resp.json()["token"]
 
 
-def test_health(client: TestClient):
+def test_health_public(client: TestClient):
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["worker_initialized"] is True
+
+
+def test_system_device_requires_auth(client: TestClient):
+    resp = client.get("/system/device")
+    assert resp.status_code == 401
+
+
+def test_register_requires_api_key(client: TestClient):
+    resp = client.post(
+        "/auth/register",
+        json={"username": "nokey", "password": "password123"},
+    )
+    assert resp.status_code == 401
 
 
 def test_auth_isolation_and_job_flow(client: TestClient):
@@ -124,10 +142,35 @@ def test_auth_isolation_and_job_flow(client: TestClient):
     assert len(wav_download.content) > 0
 
 
+def test_login_rate_limit(client: TestClient):
+    for _ in range(12):
+        client.post(
+            "/auth/login",
+            json={"username": "nobody", "password": "wrong"},
+        )
+    blocked = client.post(
+        "/auth/login",
+        json={"username": "nobody", "password": "wrong"},
+    )
+    assert blocked.status_code == 429
+
+
 def test_chunking_service():
-    from app.services.chunking import chunk_text
+    from tts_server.services.chunking import chunk_text
 
     text = "A. " + "B. " * 50
     chunks = chunk_text(text, max_chars=40)
     assert len(chunks) > 1
     assert all(len(c) <= 40 for c in chunks)
+
+
+def test_resolve_rejects_traversal():
+    from tts_server.services.security import resolve_under
+
+    base = Path("/tmp/tts-safe-base").resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    try:
+        with pytest.raises(ValueError):
+            resolve_under(base, "../outside")
+    finally:
+        base.rmdir()

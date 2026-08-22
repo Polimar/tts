@@ -1,9 +1,44 @@
+# Environment and secrets
 .env
+.env.*
+!.env.example
+
+# User data and runtime outputs (DATA_DIR default)
 data/
-__pycache__/
-*.pyc
-.pytest_cache/
+outputs/
+
+# Model caches
+models/
+.cache/
+huggingface/
+
+# Generated audio
+*.wav
+*.mp3
+!**/fixtures/**/*.wav
+!**/fixtures/**/*.mp3
+
+# Python
 .venv/
 venv/
+__pycache__/
+*.py[cod]
+*$py.class
 *.egg-info/
-/tmp/
+.eggs/
+dist/
+build/
+*.egg
+.pytest_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+tmp/
+temp/

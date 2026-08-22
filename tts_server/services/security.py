@@ -6,13 +6,33 @@ from pathlib import Path
 
 from passlib.context import CryptContext
 
-from app.config import get_settings
-from app.db.database import utcnow
+from tts_server.config import settings
+from tts_server.db.database import utcnow
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SAFE_SEGMENT = re.compile(r"^[a-zA-Z0-9_-]+$")
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+ALLOWED_AUDIO_MIME = {
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/flac",
+    "audio/x-flac",
+    "audio/ogg",
+    "application/ogg",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/m4a",
+    "application/octet-stream",
+}
+ALLOWED_TEXT_MIME = {
+    "text/plain",
+    "text/markdown",
+    "application/json",
+}
 
 
 def hash_password(password: str) -> str:
@@ -32,8 +52,7 @@ def new_id() -> str:
 
 
 def token_expiry() -> datetime:
-    settings = get_settings()
-    return utcnow() + timedelta(hours=settings.tts_token_expire_hours)
+    return utcnow() + timedelta(hours=settings.token_expire_hours)
 
 
 def sanitize_filename(name: str) -> str:
@@ -69,9 +88,24 @@ def job_export_path(users_dir: Path, user_id: str, job_id: str, ext: str) -> Pat
 
 
 def resolve_under(base: Path, rel_path: str) -> Path:
-    candidate = (base / rel_path).resolve()
+    """Resolve a relative path under base; reject traversal, absolute paths, and symlink escapes."""
     base_resolved = base.resolve()
-    if not str(candidate).startswith(str(base_resolved)):
+    rel = Path(rel_path)
+    if rel.is_absolute():
+        raise ValueError("Absolute paths not allowed")
+    if ".." in rel.parts:
+        raise ValueError("Path traversal detected")
+
+    current = base_resolved
+    for part in rel.parts:
+        current = current / part
+        if current.is_symlink():
+            symlink_target = current.resolve()
+            if not symlink_target.is_relative_to(base_resolved):
+                raise ValueError("Symlink escape detected")
+
+    candidate = (base_resolved / rel).resolve()
+    if not candidate.is_relative_to(base_resolved):
         raise ValueError("Path traversal detected")
     return candidate
 
@@ -79,6 +113,22 @@ def resolve_under(base: Path, rel_path: str) -> Path:
 def rel_to_users_dir(users_dir: Path, path: Path) -> str:
     users_resolved = users_dir.resolve()
     path_resolved = path.resolve()
-    if not str(path_resolved).startswith(str(users_resolved)):
+    if not path_resolved.is_relative_to(users_resolved):
         raise ValueError("Path outside user data directory")
     return str(path_resolved.relative_to(users_resolved))
+
+
+def normalize_mime(content_type: str | None) -> str:
+    if not content_type:
+        return ""
+    return content_type.split(";")[0].strip().lower()
+
+
+def is_allowed_audio_mime(content_type: str | None) -> bool:
+    return normalize_mime(content_type) in ALLOWED_AUDIO_MIME
+
+
+def is_allowed_text_mime(content_type: str | None) -> bool:
+    if not content_type:
+        return True
+    return normalize_mime(content_type) in ALLOWED_TEXT_MIME
