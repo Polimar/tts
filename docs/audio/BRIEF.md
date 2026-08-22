@@ -1,6 +1,6 @@
 # Brief Sound Designer — TTS vocale italiano (Polimar)
 
-**Versione:** 1.0 (v1) + appendice Dialoghi (v1.1)  
+**Versione:** 1.2 (v1) + appendice Dialoghi (v1.1)  
 **Stack motore:** Qwen3-TTS 0.6B Base, PyTorch XPU (Intel Arc) — **non** XTTS, **non** OpenVINO  
 **Bind servizio:** `0.0.0.0:8765`  
 **Deploy:** workstation Windows locale → `tts.alevale.it`  
@@ -134,31 +134,48 @@ Formula: `sample_out = clamp( sample_in * volume , true_peak_limit )`
 
 ## 3. Gap / stitch — Dialoghi (v1.1)
 
-Allineato a [`docs/ui/BRIEF.md`](../ui/BRIEF.md) § Dialoghi e lock Game Designer.
+Allineato al contratto [`docs/design/DIALOGUE.md`](../design/DIALOGUE.md) e [`dialogue-v1.1.schema.json`](../design/dialogue-v1.1.schema.json) (PR #11), più [`docs/ui/BRIEF.md`](../ui/BRIEF.md) § Dialoghi.
 
-### Costante prodotto
+### Campi rilevanti per lo stitch
 
-| Parametro | Valore |
-|-----------|--------|
-| Gap default tra turni | **350 ms** di silenzio digitale (**zero-crossing non richiesto** — silenzio PCM a 0) |
-| Override per-turno | **0–1500 ms** su `pre` e/o `post` |
-| Slider globale in Impostazioni | **Assente** (lock prodotto) |
+| Entità | Campo | Ruolo nello stitch |
+|--------|-------|-------------------|
+| **Dialogue** | `defaultGapMs` | Costante **350** ms — silenzio dopo ogni turn (prima del successivo) se il turn non ha override. **Non** è uno slider in Impostazioni. |
+| **Turn** | `gapMs` (opzionale) | Override **0–1500** ms di silenzio **dopo** l'audio di quel turn, prima del turn successivo. Se omesso → `defaultGapMs`. |
+| **Turn** | `characterId` | Risolve il parlante; la voce effettiva è `Character.voiceId`. |
+| **Character** | `voiceId` | Voce clonata **ready**; se assente al generate → turn/job **blocked** (§ sotto). |
+
+> **Lock schema:** un solo gap per turn — **dopo** il turn, **prima** del successivo. **Nessuna** coppia `pre`/`post`; non documentare né implementare pause pre/post separate.
 
 ### Regole di composizione gap
 
-Per la giunzione tra turno **A** e turno **B**:
+Silenzio = zeri PCM (24 kHz mono), senza fade.
 
-1. Se turno **A** ha `postGapMs` definito → usa **A.post** (ms di silenzio dopo A).
-2. Altrimenti se turno **B** ha `preGapMs` definito → usa **B.pre**.
-3. Se **entrambi** `A.post` e `B.pre` esistono → applica **entrambi** in sequenza (`A` audio → `A.post` silenzio → `B.pre` silenzio → `B` audio). **Non** aggiungere anche i 350 ms default su quella giunzione.
-4. Se **nessuno** dei due override → inserisci **350 ms** di silenzio.
+Per ogni turno all'indice `i` in `turns[]` (ordinati):
+
+1. Concatena l'audio TTS renderizzato del turn.
+2. Se `i` è l'**ultimo** turn → **nessun** silenzio finale (trailing gap ignorato; `gapMs` sull'ultimo turn = 0 effettivo).
+3. Altrimenti inserisci `gapMs` del turn corrente, oppure `defaultGapMs` (**350**) se `gapMs` è omesso.
 
 ```
-giunzione(A→B) =
-  A.postGapMs ?? 0
-  + B.preGapMs ?? 0
-  + (se A.postGapMs e B.preGapMs assenti: 350 ms)
+per ogni turn[i] in turns:
+  stitch += render_tts(turn[i])
+  se i < len(turns) - 1:
+    gap = turn[i].gapMs ?? dialogue.defaultGapMs   // defaultGapMs = 350
+    stitch += silence(gap)
 ```
+
+| Parametro | Valore |
+|-----------|--------|
+| `defaultGapMs` | **350** (costante prodotto, non in Impostazioni) |
+| `gapMs` override | **0–1500** ms, solo sul singolo turn |
+| Ultimo turn | Nessun gap trailing |
+
+### Pipeline stitch
+
+1. Un job dialogue = **N render TTS** (un chunk per `turn`).
+2. Concat WAV in ordine con gap come sopra.
+3. **Loudnorm** finale sul file stitch (−16 LUFS / −1.5 dBTP, §2).
 
 ### Export dialogo
 
@@ -169,7 +186,7 @@ giunzione(A→B) =
 
 ### Voce mancante
 
-Se un turno referenzia voce non pronta o assente:
+Se `Character.voiceId` non punta a una voce **ready** al momento del generate:
 
 - **Non** generare silenzio placeholder.
 - Turno / job resta **Bloccato** (stato coda UI).
@@ -340,8 +357,8 @@ Usare insieme a `errVoiceMissing` (turno/dialogo editor) o `errVoiceMissingJob` 
 
 | Team | Consuma da questo brief | Fornisce |
 |------|-------------------------|----------|
-| **Frontend** | Formati upload, messaggi QC, naming download, contratto player | Superficie upload, player, download |
-| **Game Designer** | Gap 350 ms, override 0–1500 ms, volume turno, no fallback silenzioso | Schema turno/personaggio in UI brief |
+| **Frontend** | Formati upload, messaggi QC (§7), naming download, contratto player | Superficie upload, player, download, bind chiavi §7 |
+| **Game Designer** | `defaultGapMs` 350, `gapMs` 0–1500 per turn, no fallback silenzioso | [`docs/design/dialogue-v1.1.schema.json`](../design/dialogue-v1.1.schema.json) |
 | **Backend** | Tutta la pipeline ingest/TTS/export | API job stati, file storage, progress % |
 | **2D / UI** | Messaggi errore/warn testuali | Copy IT in componenti |
 
@@ -372,7 +389,7 @@ Usare insieme a `errVoiceMissing` (turno/dialogo editor) o `errVoiceMissingJob` 
 
 ### v1.1 aggiuntive
 
-- [ ] Gap 350 ms default; override pre/post 0–1500 ms senza doppio gap
+- [ ] `defaultGapMs` 350; `gapMs` opzionale 0–1500 dopo ogni turn (non sull'ultimo); nessun pre/post
 - [ ] ZIP clip dry senza gap; stitch con gap + loudnorm finale
 - [ ] Volume turno lineare post-loudnorm + true peak −1.5 dBTP
 - [ ] Voce mancante → bloccato, no silenzio generato
@@ -385,3 +402,4 @@ Usare insieme a `errVoiceMissing` (turno/dialogo editor) o `errVoiceMissingJob` 
 |------|----------|------|
 | 2026-08-22 | 1.0 | Prima stesura Sound Designer; allineamento `docs/ui/BRIEF.md` PR #1 |
 | 2026-08-22 | 1.1 | §7 copy errori/hint IT per Frontend (chiavi camelCase) |
+| 2026-08-22 | 1.2 | §3 stitch allineato a `docs/design/` PR #11 — `gapMs` singolo, no pre/post |
