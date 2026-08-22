@@ -70,3 +70,12 @@ class DeviceInfoOut(BaseModel):
 
     device: str
     status: str
+
+
+ReadyStatus = Literal["ready", "booting", "failed"]
+
+
+class ReadyOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ReadyStatus

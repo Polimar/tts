@@ -299,6 +299,13 @@ class Database:
         with self.connect() as conn:
             conn.execute(f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?", values)
 
+    def reset_job_to_queued(self, job_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET status = 'queued', started_at = NULL WHERE id = ? AND status = 'running'",
+                (job_id,),
+            )
+
 
 _db: Optional[Database] = None
 _db_bound_path: Optional[Path] = None

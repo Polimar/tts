@@ -12,11 +12,11 @@ router = APIRouter(prefix="/system", tags=["system"])
 async def device_info(_user_id: str = Depends(get_current_user_id)) -> DeviceInfoOut:
     def _info() -> DeviceInfoOut:
         worker = get_worker()
-        if not worker.initialized:
+        status = worker.boot_status()
+        if status == "ready" and worker.info:
+            return DeviceInfoOut(device=worker.info.device, status="ready")
+        if status == "failed":
             return DeviceInfoOut(device="cpu", status="initializing")
-        info = worker.info
-        if not info:
-            return DeviceInfoOut(device="cpu", status="initializing")
-        return DeviceInfoOut(device=info.device, status="ready")
+        return DeviceInfoOut(device="cpu", status="initializing")
 
     return await run_blocking_io(_info, "GET /system/device")

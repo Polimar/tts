@@ -149,11 +149,23 @@ def test_system_device_minimal(client: TestClient):
     assert resp.status_code == 200
     body = resp.json()
     assert set(body.keys()) == {"device", "status"}
-    assert set(body.keys()) == {"device", "status"}
     assert body["device"] in {"cpu", "xpu"}
     assert body["status"] in {"ready", "initializing"}
     assert "model_id" not in body
     assert "xpu_gate" not in str(body)
+
+
+def test_ready_endpoint_auth_only(client: TestClient):
+    assert client.get(f"{API}/ready").status_code == 401
+    token = _register(client, "readyuser")
+    resp = client.get(
+        f"{API}/ready",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"status"}
+    assert body["status"] in {"ready", "booting", "failed"}
 
 
 def test_register_requires_api_key(client: TestClient):

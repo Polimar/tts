@@ -63,6 +63,9 @@ class Qwen3Worker:
         self._device: DeviceChoice = "cpu"
         self._info: Optional[WorkerInfo] = None
         self._initialized = False
+        self._boot_finished = threading.Event()
+        self._boot_failed = False
+        self._boot_error: Optional[str] = None
 
     @property
     def info(self) -> Optional[WorkerInfo]:
@@ -70,6 +73,35 @@ class Qwen3Worker:
 
     @property
     def initialized(self) -> bool:
+        return self._initialized
+
+    def is_ready(self) -> bool:
+        return self._initialized
+
+    def boot_failed(self) -> bool:
+        return self._boot_failed
+
+    @property
+    def boot_error(self) -> Optional[str]:
+        return self._boot_error
+
+    def boot_status(self) -> Literal["ready", "booting", "failed"]:
+        if self._initialized:
+            return "ready"
+        if self._boot_failed:
+            return "failed"
+        if self._boot_finished.is_set() and not self._initialized:
+            return "failed"
+        return "booting"
+
+    def wait_until_ready(self, timeout: float | None = None) -> bool:
+        """Wait for initialize() to finish. Returns True only when inference is ready."""
+        if self._initialized:
+            return True
+        if self._boot_failed:
+            return False
+        if not self._boot_finished.wait(timeout=timeout):
+            return False
         return self._initialized
 
     def _load_model(self, device_map: DeviceChoice) -> Any:
@@ -101,116 +133,126 @@ class Qwen3Worker:
             self._info.xpu_gate_reason = reason
 
     def initialize(self) -> WorkerInfo:
-        if settings.mock_worker:
-            self._info = WorkerInfo(
-                device="cpu",
-                model_id=settings.model_path,
-                xpu_gate_passed=False,
-                xpu_gate_reason="mock_worker",
-                xpu_memory_bytes=0,
-                cpu_warmup_seconds=0.0,
-                xpu_warmup_seconds=None,
-            )
-            self._device = "cpu"
-            self._initialized = True
-            logger.info("XPU gate: SKIPPED (TTS_MOCK_WORKER/MOCK_WORKER=1) -> device=cpu")
+        if self._initialized and self._info is not None:
             return self._info
+        try:
+            if settings.mock_worker:
+                self._info = WorkerInfo(
+                    device="cpu",
+                    model_id=settings.model_path,
+                    xpu_gate_passed=False,
+                    xpu_gate_reason="mock_worker",
+                    xpu_memory_bytes=0,
+                    cpu_warmup_seconds=0.0,
+                    xpu_warmup_seconds=None,
+                )
+                self._device = "cpu"
+                self._initialized = True
+                logger.info("XPU gate: SKIPPED (TTS_MOCK_WORKER/MOCK_WORKER=1) -> device=cpu")
+                return self._info
 
-        import torch
+            import torch
 
-        model_path = settings.model_path
-        warmup_ref = _ensure_warmup_reference(settings.data_dir / "warmup" / "reference.wav")
-        warmup_ref_text = "Questo è un breve campione di riferimento per il warmup."
+            model_path = settings.model_path
+            warmup_ref = _ensure_warmup_reference(settings.data_dir / "warmup" / "reference.wav")
+            warmup_ref_text = "Questo è un breve campione di riferimento per il warmup."
 
-        model = self._load_model("cpu")
-        cpu_time = self._benchmark_synthesis(
-            model,
-            device="cpu",
-            text=settings.warmup_text,
-            ref_audio=warmup_ref,
-            ref_text=warmup_ref_text,
-        )
-        if cpu_time == float("inf"):
-            logger.error("CPU warmup generate failed; worker may be unstable")
+            model = self._load_model("cpu")
+            cpu_time = self._benchmark_synthesis(
+                model,
+                device="cpu",
+                text=settings.warmup_text,
+                ref_audio=warmup_ref,
+                ref_text=warmup_ref_text,
+            )
+            if cpu_time == float("inf"):
+                logger.error("CPU warmup generate failed; worker may be unstable")
 
-        xpu_memory = 0
-        xpu_time: Optional[float] = None
-        xpu_gate_passed = False
-        gate_reason = "TTS_DEVICE=cpu (default)"
-        chosen: DeviceChoice = "cpu"
+            xpu_memory = 0
+            xpu_time: Optional[float] = None
+            xpu_gate_passed = False
+            gate_reason = "TTS_DEVICE=cpu (default)"
+            chosen: DeviceChoice = "cpu"
 
-        xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
-        if settings.tts_device == "xpu" and xpu_available:
-            gate_reason = "evaluating"
-            xpu_model: Any = None
-            try:
-                self._dispose_model(model)
-                model = None
+            xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
+            if settings.tts_device == "xpu" and xpu_available:
+                gate_reason = "evaluating"
+                xpu_model: Any = None
+                try:
+                    self._dispose_model(model)
+                    model = None
 
-                xpu_model = self._load_model("xpu")
-                xpu_memory = int(torch.xpu.memory_allocated())
-                if xpu_memory <= 0:
-                    gate_reason = "xpu memory_allocated=0 after device_map=xpu load"
-                    logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
-                else:
-                    xpu_time = self._benchmark_synthesis(
-                        xpu_model,
-                        device="xpu",
-                        text=settings.warmup_text,
-                        ref_audio=warmup_ref,
-                        ref_text=warmup_ref_text,
-                    )
-                    if xpu_time == float("inf"):
-                        gate_reason = (
-                            "XPU warmup generate failed or timing missing (fail-closed to CPU)"
-                        )
-                        logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
-                    elif xpu_time >= cpu_time:
-                        gate_reason = (
-                            f"XPU slower than CPU (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
-                        )
+                    xpu_model = self._load_model("xpu")
+                    xpu_memory = int(torch.xpu.memory_allocated())
+                    if xpu_memory <= 0:
+                        gate_reason = "xpu memory_allocated=0 after device_map=xpu load"
                         logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
                     else:
-                        xpu_gate_passed = True
-                        gate_reason = f"passed (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
-                        chosen = "xpu"
-                        model = xpu_model
-                        xpu_model = None
-                        logger.info("XPU gate: PASSED %s -> device=xpu", gate_reason)
-            except Exception as exc:
-                gate_reason = f"XPU setup error: {exc}"
-                logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
-            finally:
-                if xpu_model is not None and chosen != "xpu":
-                    self._dispose_model(xpu_model)
-                if model is None:
-                    model = self._load_model("cpu")
-        elif settings.tts_device == "xpu" and not xpu_available:
-            gate_reason = "torch.xpu not available"
-            logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
-        else:
-            logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
+                        xpu_time = self._benchmark_synthesis(
+                            xpu_model,
+                            device="xpu",
+                            text=settings.warmup_text,
+                            ref_audio=warmup_ref,
+                            ref_text=warmup_ref_text,
+                        )
+                        if xpu_time == float("inf"):
+                            gate_reason = (
+                                "XPU warmup generate failed or timing missing (fail-closed to CPU)"
+                            )
+                            logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+                        elif xpu_time >= cpu_time:
+                            gate_reason = (
+                                f"XPU slower than CPU (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
+                            )
+                            logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+                        else:
+                            xpu_gate_passed = True
+                            gate_reason = f"passed (xpu={xpu_time:.2f}s cpu={cpu_time:.2f}s)"
+                            chosen = "xpu"
+                            model = xpu_model
+                            xpu_model = None
+                            logger.info("XPU gate: PASSED %s -> device=xpu", gate_reason)
+                except Exception as exc:
+                    gate_reason = f"XPU setup error: {exc}"
+                    logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)
+                finally:
+                    if xpu_model is not None and chosen != "xpu":
+                        self._dispose_model(xpu_model)
+                    if model is None:
+                        model = self._load_model("cpu")
+            elif settings.tts_device == "xpu" and not xpu_available:
+                gate_reason = "torch.xpu not available"
+                logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
+            else:
+                logger.info("XPU gate: SKIPPED (%s) -> device=cpu", gate_reason)
 
-        self._model = model
-        self._device = chosen
-        self._info = WorkerInfo(
-            device=chosen,
-            model_id=model_path,
-            xpu_gate_passed=xpu_gate_passed,
-            xpu_gate_reason=gate_reason,
-            xpu_memory_bytes=xpu_memory,
-            cpu_warmup_seconds=cpu_time,
-            xpu_warmup_seconds=xpu_time,
-        )
-        self._initialized = True
-        logger.info(
-            "Worker ready device=%s model=%s xpu_gate_passed=%s reason=%s",
-            chosen,
-            model_path,
-            xpu_gate_passed,
-            gate_reason,
-        )
-        return self._info
+            self._model = model
+            self._device = chosen
+            self._info = WorkerInfo(
+                device=chosen,
+                model_id=model_path,
+                xpu_gate_passed=xpu_gate_passed,
+                xpu_gate_reason=gate_reason,
+                xpu_memory_bytes=xpu_memory,
+                cpu_warmup_seconds=cpu_time,
+                xpu_warmup_seconds=xpu_time,
+            )
+            self._initialized = True
+            logger.info(
+                "Worker ready device=%s model=%s xpu_gate_passed=%s reason=%s",
+                chosen,
+                model_path,
+                xpu_gate_passed,
+                gate_reason,
+            )
+            return self._info
+        except Exception as exc:
+            self._boot_failed = True
+            self._boot_error = str(exc)
+            logger.exception("Worker initialization failed")
+            raise
+        finally:
+            self._boot_finished.set()
 
     def _benchmark_synthesis(
         self,
@@ -250,6 +292,8 @@ class Qwen3Worker:
         voice_prompt: Any,
     ) -> tuple[np.ndarray, int, Any]:
         if settings.mock_worker:
+            if not self._initialized:
+                raise RuntimeError("Worker not initialized")
             audio, sr = mock_synthesis(duration_seconds=min(2.0, max(0.5, len(text) / 80.0)))
             return audio, sr, voice_prompt
 
@@ -326,16 +370,50 @@ class JobQueue:
         db = get_db()
         worker = get_worker()
         while not self._stop.is_set():
+            if worker.boot_failed():
+                job = db.claim_next_queued_job()
+                if job:
+                    err = worker.boot_error or "Worker initialization failed"
+                    db.update_job(
+                        job["id"],
+                        status="failed",
+                        error=err,
+                        completed=True,
+                    )
+                else:
+                    time.sleep(settings.queue_poll_seconds)
+                continue
+
+            if not worker.is_ready():
+                worker.wait_until_ready(timeout=settings.queue_poll_seconds)
+                continue
+
             job = db.claim_next_queued_job()
             if not job:
                 time.sleep(settings.queue_poll_seconds)
                 continue
             self._process_job(job, worker, db)
 
+    def _ensure_worker_ready(self, job_id: str, worker: Qwen3Worker, db: Any) -> bool:
+        if worker.is_ready():
+            return True
+        if not worker.wait_until_ready(timeout=settings.worker_boot_timeout_seconds):
+            if worker.boot_failed():
+                err = worker.boot_error or "Worker initialization failed"
+                db.update_job(job_id, status="failed", error=err, completed=True)
+            else:
+                db.reset_job_to_queued(job_id)
+                logger.info("Job %s returned to queue — worker still booting", job_id)
+            return False
+        return True
+
     def _process_job(self, job: dict[str, Any], worker: Qwen3Worker, db: Any) -> None:
         job_id = job["id"]
         user_id = job["user_id"]
         voice_id = job["voice_id"]
+
+        if not self._ensure_worker_ready(job_id, worker, db):
+            return
 
         try:
             voice = db.get_voice(voice_id, user_id)

@@ -109,6 +109,7 @@ class Settings:
     http_read_timeout_seconds: float
     http_upload_timeout_seconds: float
     db_lock_timeout_seconds: float
+    worker_boot_timeout_seconds: float
 
     def __init__(self) -> None:
         self.host = _env_str("HOST", "0.0.0.0")
@@ -135,6 +136,7 @@ class Settings:
         self.http_read_timeout_seconds = _env_float("HTTP_READ_TIMEOUT_SECONDS", 10.0)
         self.http_upload_timeout_seconds = _env_float("HTTP_UPLOAD_TIMEOUT_SECONDS", 120.0)
         self.db_lock_timeout_seconds = _env_float("DB_LOCK_TIMEOUT_SECONDS", 5.0)
+        self.worker_boot_timeout_seconds = _env_float("WORKER_BOOT_TIMEOUT_SECONDS", 600.0)
 
     @property
     def users_dir(self) -> Path:
