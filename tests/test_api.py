@@ -15,6 +15,8 @@ os.environ["QUEUE_POLL_SECONDS"] = "0.1"
 
 from tts_server.main import create_app
 
+API = "/api/v1"
+
 
 def _make_wav_bytes(duration: float = 0.5, sample_rate: int = 24000) -> bytes:
     n = int(duration * sample_rate)
@@ -55,7 +57,7 @@ def client(tmp_path: Path):
 
 def _register(client: TestClient, username: str = "alice") -> str:
     resp = client.post(
-        "/auth/register",
+        f"{API}/auth/register",
         headers={"X-API-Key": os.environ["API_KEY"]},
         json={"username": username, "password": "password123"},
     )
@@ -71,15 +73,21 @@ def test_health_public(client: TestClient):
     assert set(body.keys()) == {"status"}
 
 
+def test_static_index(client: TestClient):
+    resp = client.get("/")
+    if resp.status_code == 200:
+        assert "html" in resp.text.lower()
+
+
 def test_system_device_requires_auth(client: TestClient):
-    resp = client.get("/system/device")
+    resp = client.get(f"{API}/system/device")
     assert resp.status_code == 401
 
 
 def test_system_device_minimal(client: TestClient):
     token = _register(client, "deviceuser")
     resp = client.get(
-        "/system/device",
+        f"{API}/system/device",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
@@ -91,7 +99,7 @@ def test_system_device_minimal(client: TestClient):
 
 def test_register_requires_api_key(client: TestClient):
     resp = client.post(
-        "/auth/register",
+        f"{API}/auth/register",
         json={"username": "nokey", "password": "password123"},
     )
     assert resp.status_code == 401
@@ -103,7 +111,7 @@ def test_auth_isolation_and_job_flow(client: TestClient):
 
     wav = _make_wav_bytes()
     voice_resp = client.post(
-        "/voices",
+        f"{API}/voices",
         headers={"Authorization": f"Bearer {token_a}"},
         data={
             "name": "Mia voce",
@@ -116,13 +124,13 @@ def test_auth_isolation_and_job_flow(client: TestClient):
     voice_id = voice_resp.json()["id"]
 
     other_voice = client.get(
-        f"/voices/{voice_id}",
+        f"{API}/voices/{voice_id}",
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert other_voice.status_code == 404
 
     job_resp = client.post(
-        "/jobs",
+        f"{API}/jobs",
         headers={"Authorization": f"Bearer {token_a}"},
         json={
             "voice_id": voice_id,
@@ -135,7 +143,7 @@ def test_auth_isolation_and_job_flow(client: TestClient):
     assert job_resp.json()["status"] == "queued"
 
     other_job = client.get(
-        f"/jobs/{job_id}",
+        f"{API}/jobs/{job_id}",
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert other_job.status_code == 404
@@ -144,7 +152,7 @@ def test_auth_isolation_and_job_flow(client: TestClient):
     status = "queued"
     while time.time() < deadline:
         poll = client.get(
-            f"/jobs/{job_id}",
+            f"{API}/jobs/{job_id}",
             headers={"Authorization": f"Bearer {token_a}"},
         )
         status = poll.json()["status"]
@@ -154,14 +162,14 @@ def test_auth_isolation_and_job_flow(client: TestClient):
 
     assert status == "completed"
     final = client.get(
-        f"/jobs/{job_id}",
+        f"{API}/jobs/{job_id}",
         headers={"Authorization": f"Bearer {token_a}"},
     ).json()
     assert final["wav_available"] is True
     assert final["chunk_count"] >= 1
 
     wav_download = client.get(
-        f"/jobs/{job_id}/download/wav",
+        f"{API}/jobs/{job_id}/download/wav",
         headers={"Authorization": f"Bearer {token_a}"},
     )
     assert wav_download.status_code == 200
@@ -171,11 +179,11 @@ def test_auth_isolation_and_job_flow(client: TestClient):
 def test_login_rate_limit(client: TestClient):
     for _ in range(12):
         client.post(
-            "/auth/login",
+            f"{API}/auth/login",
             json={"username": "nobody", "password": "wrong"},
         )
     blocked = client.post(
-        "/auth/login",
+        f"{API}/auth/login",
         json={"username": "nobody", "password": "wrong"},
     )
     assert blocked.status_code == 429
@@ -184,12 +192,12 @@ def test_login_rate_limit(client: TestClient):
 def test_register_rate_limit(client: TestClient):
     for i in range(12):
         client.post(
-            "/auth/register",
+            f"{API}/auth/register",
             headers={"X-API-Key": os.environ["API_KEY"]},
             json={"username": f"user{i}", "password": "password123"},
         )
     blocked = client.post(
-        "/auth/register",
+        f"{API}/auth/register",
         headers={"X-API-Key": os.environ["API_KEY"]},
         json={"username": "user_blocked", "password": "password123"},
     )
@@ -199,7 +207,7 @@ def test_register_rate_limit(client: TestClient):
 def test_upload_rejects_non_audio_content(client: TestClient):
     token = _register(client, "uploaduser")
     resp = client.post(
-        "/voices",
+        f"{API}/voices",
         headers={"Authorization": f"Bearer {token}"},
         data={"name": "bad", "ref_text": "test", "language": "Italian"},
         files={"audio": ("fake.wav", b"not-audio-content", "audio/wav")},

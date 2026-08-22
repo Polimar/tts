@@ -26,8 +26,10 @@ __pycache__/
 *$py.class
 *.egg-info/
 .eggs/
-dist/
+/dist/
 build/
+!frontend/dist/
+!frontend/dist/**
 *.egg
 .pytest_cache/
 

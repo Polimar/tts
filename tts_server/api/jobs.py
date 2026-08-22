@@ -72,6 +72,14 @@ def get_job(job_id: str, user_id: str = Depends(get_current_user_id)) -> JobOut:
     return _job_to_out(job)
 
 
+@router.get("/{job_id}/audio")
+def download_job_audio(
+    job_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> FileResponse:
+    return download_job(job_id, "wav", user_id)
+
+
 @router.get("/{job_id}/download/{format}")
 def download_job(
     job_id: str,

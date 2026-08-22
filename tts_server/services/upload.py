@@ -25,7 +25,7 @@ async def stream_upload_bounded(
         try:
             if int(content_length) > max_bytes + MULTIPART_OVERHEAD_BYTES:
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="Upload too large",
                 )
         except ValueError:
@@ -33,7 +33,7 @@ async def stream_upload_bounded(
 
     if upload.size is not None and upload.size > max_bytes:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Upload too large",
         )
 
@@ -50,7 +50,7 @@ async def stream_upload_bounded(
                 total += len(chunk)
                 if total > max_bytes:
                     raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         detail="Upload too large",
                     )
                 if len(header) < 16:

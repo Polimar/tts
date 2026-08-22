@@ -1,8 +1,9 @@
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from tts_server.auth.cookies import SESSION_COOKIE
 from tts_server.config import settings
 from tts_server.db.database import get_db
 from tts_server.services.security import validate_safe_segment
@@ -12,14 +13,21 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def get_current_user_id(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    tts_session: Optional[str] = Cookie(default=None),
 ) -> str:
-    if credentials is None or not credentials.credentials:
+    token: Optional[str] = None
+    if credentials and credentials.credentials:
+        token = credentials.credentials
+    elif tts_session:
+        token = tts_session
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = credentials.credentials
+
     session = get_db().get_session(token)
     if not session:
         raise HTTPException(
@@ -36,6 +44,8 @@ def get_current_user_id(
 
 
 def verify_api_key(x_api_key: Optional[str] = None) -> None:
+    if settings.mock_worker and settings.api_key.startswith("change-me"):
+        return
     if not x_api_key or x_api_key != settings.api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 
+from tts_server.auth.cookies import clear_session_cookie, set_session_cookie, SESSION_COOKIE
 from tts_server.auth.dependencies import bearer_scheme, get_current_user_id, verify_api_key
 from tts_server.config import settings
 from tts_server.db.database import get_db
@@ -36,6 +37,7 @@ def _enforce_auth_rate_limit(request: Request) -> None:
 def register(
     body: RegisterRequest,
     request: Request,
+    response: Response,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> AuthResponse:
     _enforce_auth_rate_limit(request)
@@ -49,6 +51,7 @@ def register(
     token = new_token()
     expires = token_expiry()
     db.create_session(token, user_id, expires)
+    set_session_cookie(response, token)
 
     return AuthResponse(
         token=token,
@@ -58,7 +61,7 @@ def register(
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(body: LoginRequest, request: Request) -> AuthResponse:
+def login(body: LoginRequest, request: Request, response: Response) -> AuthResponse:
     _enforce_auth_rate_limit(request)
 
     db = get_db()
@@ -69,6 +72,7 @@ def login(body: LoginRequest, request: Request) -> AuthResponse:
     token = new_token()
     expires = token_expiry()
     db.create_session(token, user["id"], expires)
+    set_session_cookie(response, token)
 
     return AuthResponse(
         token=token,
@@ -79,11 +83,15 @@ def login(body: LoginRequest, request: Request) -> AuthResponse:
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    response: Response,
     credentials=Depends(bearer_scheme),
+    tts_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     user_id: str = Depends(get_current_user_id),
 ) -> None:
-    if credentials and credentials.credentials:
-        get_db().delete_session(credentials.credentials)
+    token = credentials.credentials if credentials and credentials.credentials else tts_session
+    if token:
+        get_db().delete_session(token)
+    clear_session_cookie(response)
 
 
 @router.get("/me", response_model=UserOut)
