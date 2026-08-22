@@ -15,4 +15,8 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "tts"
+
+include(":tts-client")
+project(":tts-client").projectDir = file("clients/android/tts-client")
+
 include(":android-client")

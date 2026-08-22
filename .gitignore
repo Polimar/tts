@@ -10,4 +10,5 @@
 *.apk
 *.ap_
 *.aab
+clients/android/tts-client/build/
 android-client/build/
