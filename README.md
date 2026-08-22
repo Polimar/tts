@@ -143,16 +143,24 @@ Default: **`cpu`**. Il worker locale su Windows deve usare CPU finché non esist
 
 #### XPU: esito ricerca (fail-closed)
 
-Su **Windows Ultra 9 285H + Intel Arc 140T** il Researcher ha registrato **NO-GO**:
+Su **Windows Ultra 9 285H + Intel Arc 140T** (`torch 2.13.0+xpu`, `xpu.is_available()` → `True`):
 
-- `torch 2.13.0+xpu`, `xpu.is_available()` → `True`
-- `model.model.to("xpu")` carica ~1,8 GB su `xpu:0`
-- `generate_voice_clone` **crash**: gli input ids restano su CPU mentre i pesi sono su `xpu:0`
-- Nessun timing post-warmup utile (la generazione non completa)
+**Gate 1 — `.to("xpu")` da solo (NO-GO funzionale)**
 
-**Decisione team:** il worker usa **CPU** di default. XPU è ammesso solo se un warmup di generazione completa riesce **e** batte CPU su latenza; altrimenti **fail-closed** (non avviare su XPU). Spostare solo i pesi con `.to("xpu")` **non basta** — serve allineamento device su tutto il forward.
+- `model.model.to("xpu")` carica ~1,8 GB su `xpu:0` (`memory_allocated` ≈ 2 170 915 840 byte)
+- `generate_voice_clone` **crash**: input ids su CPU, pesi su `xpu:0`
+- Dopo `.to("cpu")` gli ids possono **restare su xpu** — device mismatch persistente
+- Nessun timing post-warmup utile
 
-Non documentare Intel Arc / XPU come percorso locale supportato finché questi criteri non sono soddisfatti.
+**Gate 2 — `device_map="xpu"` + `.to("xpu")` (generazione OK, ancora NO-GO)**
+
+- `generate_voice_clone` **completa** con `device_map="xpu"` + `.to("xpu")`
+- Memoria su device: ~2,17 GB; warmup ~15,7 s, poi generazione ~6,86 s (stesso testo)
+- Stesso testo su **CPU** post-warmup: ~4,96 s → **XPU più lento** (~38% slower)
+
+**Decisione team (fail-closed):** default `TTS_DEVICE=cpu`. XPU non è un percorso locale **supportato**. Ammesso solo se warmup di generazione completa riesce **e** batte CPU su latenza post-warmup; altrimenti non usare XPU. `.to("xpu")` da solo **non basta**; anche con `device_map="xpu"` la latenza attuale non giustifica il passaggio.
+
+Non documentare Intel Arc / XPU come percorso locale supportato finché XPU batte CPU end-to-end.
 
 La coda inference è **seriale**: un solo job alla volta sul device attivo; non avviare più worker concorrenti sullo stesso accelerator.
 
