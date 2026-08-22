@@ -128,8 +128,8 @@ class Qwen3Worker:
                     )
                     if xpu_time == float("inf"):
                         gate_reason = (
-                            "full generate warmup failed on XPU "
-                            "(likely CPU/XPU tensor mismatch in qwen-tts)"
+                            "XPU warmup generate failed or timing missing "
+                            "(fail-closed to CPU)"
                         )
                         model.model = model.model.to("cpu")
                         logger.warning("XPU gate: FAILED (%s) -> device=cpu", gate_reason)

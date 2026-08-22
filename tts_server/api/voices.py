@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from tts_server.auth.dependencies import get_current_user_id
-from tts_server.config import settings
+from tts_server.config import settings, secure_mkdir
 from tts_server.db.database import get_db
 from tts_server.schemas import VoiceOut
 from tts_server.services.security import (
@@ -52,7 +52,7 @@ async def create_voice(
 
     voice_id = new_id()
     dest = voice_audio_path(settings.users_dir, user_id, voice_id, filename)
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    secure_mkdir(dest.parent)
     dest.write_bytes(content)
 
     rel_path = rel_to_users_dir(settings.users_dir, dest)

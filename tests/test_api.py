@@ -8,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 os.environ["MOCK_WORKER"] = "1"
-os.environ["DATA_DIR"] = "/tmp/tts-test-data"
 os.environ["JWT_SECRET"] = "test-jwt-secret"
 os.environ["API_KEY"] = "test-api-key"
 os.environ["QUEUE_POLL_SECONDS"] = "0.1"
@@ -31,10 +30,16 @@ def _make_wav_bytes(duration: float = 0.5, sample_rate: int = 24000) -> bytes:
 @pytest.fixture()
 def client(tmp_path: Path):
     os.environ["DATA_DIR"] = str(tmp_path / "data")
-    # Reload settings singleton for isolated data dir
     from tts_server import config as config_module
+    from tts_server.db import database as db_module
+    from tts_server.worker import qwen3_worker as worker_module
 
     config_module.settings = config_module.Settings()
+    db_module._db = None
+    db_module._db_bound_path = None
+    worker_module._worker = None
+    worker_module._queue = None
+
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
@@ -54,8 +59,11 @@ def test_health_public(client: TestClient):
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["status"] == "ok"
-    assert body["worker_initialized"] is True
+    assert body == {"status": "ok", "worker_ready": True}
+    assert "model_id" not in body
+    assert "data_dir" not in body
+    assert "jwt" not in body
+    assert "api_key" not in body
 
 
 def test_system_device_requires_auth(client: TestClient):
@@ -162,6 +170,19 @@ def test_chunking_service():
     chunks = chunk_text(text, max_chars=40)
     assert len(chunks) > 1
     assert all(len(c) <= 40 for c in chunks)
+
+
+def test_default_data_dir_outside_repo():
+    from tts_server import config as config_module
+
+    old = os.environ.pop("DATA_DIR", None)
+    try:
+        cfg = config_module.Settings()
+        repo = config_module._repo_root().resolve()
+        assert not str(cfg.data_dir).startswith(str(repo))
+    finally:
+        if old is not None:
+            os.environ["DATA_DIR"] = old
 
 
 def test_resolve_rejects_traversal():

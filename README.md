@@ -61,7 +61,7 @@ Variabili critiche per DevOps:
 |---|---|---|
 | `HOST` | `0.0.0.0` | Bind di rete (obbligatorio per NPM sulla LAN) |
 | `PORT` | `8765` | Porta API |
-| `DATA_DIR` | `./data` | Root isolata per upload, voci, job, export |
+| `DATA_DIR` | (fuori repo, vedi sotto) | Root isolata per upload, voci, job, export |
 
 L’app legge queste variabili tramite `tts_server.config` (vedi sotto).
 
@@ -91,18 +91,25 @@ curl http://<IP-WINDOWS>:8765/health
 
 ### Health check
 
-`GET /health` — pubblico, senza auth. Risposta attesa: HTTP 200 (es. `{"status":"ok", ...}`). NPM può usare questo URL per il health check del proxy.
+`GET /health` — pubblico, senza auth. Risposta minima: `{"status":"ok","worker_ready":true}` (nessun path, secret o dump env).
 
 ---
 
 ## Directory dati e cache
 
-### `DATA_DIR` (default `./data`)
+### `DATA_DIR` (default fuori dal repository)
 
-Root per dati utente-isolati (il backend crea sottocartelle per utente):
+Se `DATA_DIR` non è impostato:
+
+| OS | Percorso default |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Polimar\tts` |
+| Linux | `~/.local/share/polimar-tts` (o `$XDG_DATA_HOME/polimar-tts`) |
+
+Il backend crea la directory con permessi owner-only (non world-writable). File utente sotto `users/<user_id>/`:
 
 ```
-data/
+<DATA_DIR>/
 ├── users/
 │   └── <user_id>/
 │       ├── voices/<voice_id>/   # audio di riferimento
@@ -110,7 +117,7 @@ data/
 └── tts.db                       # metadati (SQLite)
 ```
 
-`DATA_DIR` è configurabile via `.env`; non committare il contenuto.
+Override esplicito via `.env` solo se necessario; non committare il contenuto.
 
 ### Cache modelli Hugging Face
 

@@ -61,11 +61,7 @@ class JobOut(BaseModel):
 
 class HealthOut(BaseModel):
     status: str
-    worker_initialized: bool
-    device: Optional[str] = None
-    model_id: Optional[str] = None
-    xpu_gate_passed: Optional[bool] = None
-    xpu_gate_reason: Optional[str] = None
+    worker_ready: bool
 
 
 class DeviceInfoOut(BaseModel):

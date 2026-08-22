@@ -1,6 +1,7 @@
 """Runtime configuration from environment (DevOps + backend)."""
 
 import os
+import stat
 from pathlib import Path
 
 
@@ -30,6 +31,51 @@ def _env_bool(key: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _default_data_dir() -> Path:
+    """Prefer a data root outside the repository tree."""
+    if os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            return Path(local_app) / "Polimar" / "tts"
+        return Path.home() / "AppData" / "Local" / "Polimar" / "tts"
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    if xdg_data:
+        return Path(xdg_data) / "polimar-tts"
+    return Path.home() / ".local" / "share" / "polimar-tts"
+
+
+def _resolve_data_dir(raw: str | None) -> Path:
+    if raw is None or not raw.strip():
+        return _default_data_dir().expanduser().resolve()
+    path = Path(raw.strip()).expanduser()
+    if not path.is_absolute():
+        path = (_repo_root() / path).resolve()
+    else:
+        path = path.resolve()
+    return path
+
+
+def _secure_chmod_dir(path: Path) -> None:
+    """Restrict directory permissions (owner-only); avoid world-writable paths."""
+    try:
+        if os.name == "nt":
+            os.chmod(path, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+        else:
+            os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
+def secure_mkdir(path: Path) -> None:
+    """Create directory with owner-only permissions."""
+    path.mkdir(parents=True, exist_ok=True)
+    _secure_chmod_dir(path)
+
+
 class Settings:
     """Runtime settings read from environment variables."""
 
@@ -53,7 +99,7 @@ class Settings:
     def __init__(self) -> None:
         self.host = _env_str("HOST", "0.0.0.0")
         self.port = _env_int("PORT", 8765)
-        self.data_dir = Path(_env_str("DATA_DIR", "./data")).expanduser().resolve()
+        self.data_dir = _resolve_data_dir(os.getenv("DATA_DIR"))
         self.jwt_secret = _env_str("JWT_SECRET", "change-me-generate-a-random-secret")
         self.api_key = _env_str("API_KEY", "change-me-optional-static-api-key")
         self.max_upload_bytes = _env_int("MAX_UPLOAD_BYTES", 20 * 1024 * 1024)
@@ -84,9 +130,9 @@ class Settings:
         return self.model_id
 
     def ensure_data_dir(self) -> Path:
-        """Create DATA_DIR if missing; per-user paths live under data/users/."""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.users_dir.mkdir(parents=True, exist_ok=True)
+        """Create DATA_DIR (owner-only) if missing; user files under users/<user_id>/."""
+        secure_mkdir(self.data_dir)
+        secure_mkdir(self.users_dir)
         return self.data_dir
 
 

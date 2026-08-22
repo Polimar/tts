@@ -4,11 +4,13 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from tts_server.config import secure_mkdir
+
 logger = logging.getLogger(__name__)
 
 
 def write_wav(path: Path, audio: np.ndarray, sample_rate: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    secure_mkdir(path.parent)
     if audio.ndim > 1:
         audio = audio.squeeze()
     sf.write(str(path), audio, sample_rate)
@@ -27,7 +29,7 @@ def concatenate_chunks(chunks: list[np.ndarray]) -> np.ndarray:
 
 
 def write_mp3_from_wav(wav_path: Path, mp3_path: Path) -> None:
-    mp3_path.parent.mkdir(parents=True, exist_ok=True)
+    secure_mkdir(mp3_path.parent)
     try:
         from pydub import AudioSegment
 
