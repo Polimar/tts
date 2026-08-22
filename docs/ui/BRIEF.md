@@ -95,12 +95,12 @@ Webapp per clonazione vocale locale e sintesi TTS in italiano. Ogni utente ha vo
 
 1. Click **Nuova voce** → upload audio
 2. **Formati accettati (UI):** WAV / FLAC (preferiti), MP3 / M4A (ok)
-3. **Helper copy (sotto il dropzone):** «8–90 s · ideale 15–30 s · un solo parlante»
-4. **Validazione client-side:** misura durata file → **blocca submit** se &lt; 8 s o &gt; 90 s (errore inline, es. «Durata non valida: min 8 s, max 90 s»)
+3. **Helper copy (sotto il dropzone):** chiave `hintUploadDuration`
+4. **Validazione client-side:** misura durata file → **blocca submit** se &lt; 8 s (`errUploadTooShort`) o &gt; 90 s (`errUploadTooLong`); formato non accettato → `errUploadFormat`
 5. **Hint informativo (non controllo):** «Stereo→mono e resample a 24 kHz avvengono lato server» — **nessun toggle** stereo/mono o sample rate in UI
 6. Progress upload **determinato** (barra %)
 7. Dopo submit → card in stato **In elaborazione** → polling o SSE fino a **Pronta** / **Errore**
-8. Errore: messaggio inline sulla card + toast
+8. Errore server post-upload: mappa a chiavi copy lock (`errUploadClip`, `errUploadSilent`, `errUploadMultiSpeaker`); warning qualità → `warnUploadNoisy` (non blocca). Inline card + toast
 
 ### Stati voce
 
@@ -172,7 +172,7 @@ Usato quando un turno dialogo referenzia una **voce mancante** o non pronta.
 
 - **Mai** fallback silenzioso né **audio placeholder** su voce mancante; senza voce → **impossibile generare**
 - UI: **badge ambra** «Bloccato» + personaggio/voce mancante — **nessuna illustrazione** empty-state
-- CTA: **Apri voce** (deep link a `/voci`) o **Rimuovi turno** (se API lo consente)
+- CTA: **Vai alle voci** → `/voci` o **Rimuovi turno** (se API lo consente)
 
 ### Empty state (2D lock)
 
@@ -249,8 +249,8 @@ Formato default pre-selezionato da Impostazioni utente.
 | Entità | Definizione |
 |--------|-------------|
 | **Dialogo** | Lista ordinata di **turni** |
-| **Turno** | `characterId`, `text`, override opzionali: pre/post pause, speed, volume, **gap** (0–1500 ms; default costante **350 ms**) |
-| **Personaggio** | Config (non asset): voce già clonata + nome display + colore UI + speed/pitch default |
+| **Turno** | `characterId`, `text`, `gapMs` (0–1500 ms; default `defaultGapMs` **350**) |
+| **Personaggio** | `voiceId`, `name`, `color`, `speed`, `pitch`, `avatar?` — **non** `displayName` / `avatarId` |
 | **Job dialogo** | N job TTS (1 turno = 1 chunk) → concat WAV in ordine; gap stitch = **350 ms** (costante prodotto, editabile solo per-turno) |
 
 ### Regole invarianti
@@ -420,7 +420,7 @@ Target primario: **workstation locale Windows** (Arc GPU).
 
 Checklist ticketabile per Frontend. **Nessun codice React in questo doc.** Tutti i lock precedenti (teal, empty states, Sound, gap 350 ms, avatar path) restano validi.
 
-**Game Designer (JSON):** chiavi **camelCase in inglese**. Schema personaggi/dialoghi in arrivo nel repo; i **libri non sono** in quel JSON (restano job mono-voce testo/libro via API job).
+**Game Designer (JSON):** chiavi **camelCase in inglese**. Schema personaggi/dialoghi in arrivo nel repo; i **libri non sono** in quel JSON. **Non usare** `displayName` / `avatarId` — usare `name` / `avatar`.
 
 ### Empty states
 
@@ -433,19 +433,43 @@ Checklist ticketabile per Frontend. **Nessun codice React in questo doc.** Tutti
 
 Badge **v1.1** su Dialoghi: **solo in nav**, non sull'empty state.
 
+### Copy keys (lock — IT)
+
+Chiavi camelCase per i18n Frontend. **Non aggiungere stringhe** oltre questo set per upload/voce mancante.
+
+| Chiave | Testo IT |
+|--------|----------|
+| `hintUploadDuration` | 8–90 secondi, meglio 15–30. Un parlante, senza musica. |
+| `errUploadFormat` | Formato non supportato. Usa WAV, FLAC, MP3 o M4A. |
+| `errUploadTooShort` | Audio troppo corto. Serve almeno 8 secondi di parlato. |
+| `errUploadTooLong` | Audio troppo lungo. Massimo 90 secondi. |
+| `errUploadClip` | Audio distorto o troppo forte. Registra di nuovo senza clipping. |
+| `errUploadSilent` | Non sento parlato. Controlla microfono e volume. |
+| `errUploadMultiSpeaker` | Sembra ci siano più voci. Carica un solo parlante, senza musica. |
+| `warnUploadNoisy` | C’è molto rumore di fondo. Puoi usarlo, ma il clone uscirà meno pulito. |
+| `errVoiceMissing` | Manca la voce di questo personaggio… |
+| `errVoiceMissingJob` | Job bloccato: voce assente. Nessun silenzio al posto della voce. |
+
+**CTA voce mancante:** **Vai alle voci** → `/voci`. **Nessuno slider LUFS** in v1.
+
 ### Errori (copy IT — inline; toast dove indicato)
 
-| Contesto | Trigger | UI | Copy (o placeholder) |
-|----------|---------|-----|----------------------|
+| Contesto | Trigger | UI | Chiave copy |
+|----------|---------|-----|-------------|
 | Login | Email non valida | Inline campo email | «Email non valida» |
 | Login | Password vuota / errata | Inline campo password | «Password non valida» / «Credenziali errate» |
 | Login | Errore rete | Toast | «Errore di connessione. Riprova.» |
-| Upload voce | Formato non WAV/FLAC/MP3/M4A | Inline dropzone | `[SOUND]` stringa finale |
-| Upload voce | Durata &lt; 8 s o &gt; 90 s | Inline dropzone | `[SOUND]` stringa finale |
-| Upload voce | Errore server post-upload | Inline card + toast | Messaggio API o `[SOUND]` |
+| Upload voce | Formato non WAV/FLAC/MP3/M4A | Inline dropzone | `errUploadFormat` |
+| Upload voce | Durata &lt; 8 s | Inline dropzone | `errUploadTooShort` |
+| Upload voce | Durata &gt; 90 s | Inline dropzone | `errUploadTooLong` |
+| Upload voce | Clipping / troppo forte | Inline card + toast | `errUploadClip` |
+| Upload voce | Silenzio / no parlato | Inline card + toast | `errUploadSilent` |
+| Upload voce | Più parlanti | Inline card + toast | `errUploadMultiSpeaker` |
+| Upload voce | Rumore di fondo elevato | Inline warning (non blocca) | `warnUploadNoisy` |
 | Genera (testo/libro) | Nessuna voce selezionata | Primary **disabilitato** + hint | «Seleziona una voce» + link `/voci` |
 | Coda job | Stato `errore` | Riga + dettaglio | Messaggio API (non inventare) |
-| Dialogo | Voce/personaggio mancante | Stato **`bloccato`**, badge ambra | «Voce mancante: {nome}» + CTA **Apri voce** → `/voci` o personaggio |
+| Dialogo (editor) | Voce/personaggio mancante | Chip + riga errore | `errVoiceMissing` + CTA **Vai alle voci** → `/voci` |
+| Dialogo (coda) | Job `bloccato`, voce assente | Badge ambra | `errVoiceMissingJob` + CTA **Vai alle voci** → `/voci` |
 | Dialogo | Cap personaggi | Hard block UI | «Massimo 8 personaggi» |
 | Dialogo | Cap turni | Hard block UI | «Massimo 40 turni» |
 | Dialogo | Cap caratteri/turno | Hard block input | «Massimo 4000 caratteri per turno» |
@@ -478,12 +502,12 @@ Badge **v1.1** su Dialoghi: **solo in nav**, non sull'empty state.
 
 Schema file in arrivo nel repo; binding minimo per Sprint 2:
 
-**Personaggio (`Character`)**
+**Personaggio (`Character`)** — chiavi lock: `voiceId`, `name`, `color`, `speed`, `pitch`, `avatar?` (opzionale). **Non** `displayName` / `avatarId`.
 
 | Campo UI | Chiave JSON | Note |
 |----------|-------------|------|
 | Voce collegata | `voiceId` | Obbligatorio; voce utente in stato pronta |
-| Nome display | `name` | — |
+| Nome | `name` | — |
 | Colore swatch / barra riga | `color` | Hex o token — non sul busto |
 | Velocità default | `speed` | — |
 | Pitch default | `pitch` | — |
@@ -495,19 +519,15 @@ Schema file in arrivo nel repo; binding minimo per Sprint 2:
 |----------|-------------|------|
 | Lista personaggi | `characters` | Array **1–8** |
 | Lista turni | `turns` | Array **1–40** |
-| Gap stitch default | `defaultGapMs` | **350** — costante prodotto, **non** in Impostazioni |
+| Gap stitch default | `defaultGapMs` | **350** — solo in JSON; **non** in Impostazioni |
 
-**Turno (`Turn`)**
+**Turno (`Turn`)** — chiavi lock: `characterId`, `text`, `gapMs`
 
 | Campo UI | Chiave JSON | Vincoli |
 |----------|-------------|---------|
 | Speaker | `characterId` | Ref a `characters[].id` |
 | Testo | `text` | Max **4000** char (hard block) |
-| Gap dopo turno | `gapMs` | **0–1500**; default eredita `defaultGapMs` |
-| Velocità override | `speed` | Opzionale (se in GDD) |
-| Volume override | `volume` | Opzionale (se in GDD) |
-| Pausa pre | `prePauseMs` | Opzionale (se in GDD) |
-| Pausa post | `postPauseMs` | Opzionale (se in GDD) |
+| Gap dopo turno | `gapMs` | **0–1500**; default eredita `defaultGapMs` (350) |
 
 **Libri:** fuori da questo JSON — job `type: libro` via API coda; un job, una voce, testo sorgente file/incolla.
 
@@ -515,10 +535,10 @@ Schema file in arrivo nel repo; binding minimo per Sprint 2:
 
 - [ ] Empty states `/voci`, `/coda`, `/dialoghi` con CTA lock
 - [ ] Avatar fallback iniziali teal; asset da `docs/ui/avatars/*.png|webp`
-- [ ] Upload: accept + validazione durata client; placeholder `[SOUND]` su errori audio
+- [ ] Upload: accept + validazione durata client; copy keys lock (`errUpload*`, `warnUploadNoisy`, `hintUploadDuration`)
 - [ ] Genera disabilitato senza voce; hint + link Voci
 - [ ] Tabella coda: 5 stati, 3 tipi, progress Frase N/M su libri
-- [ ] Stato `bloccato`: badge ambra, CTA voce, no audio placeholder
+- [ ] Stato `bloccato`: badge ambra, `errVoiceMissingJob`, CTA Vai alle voci, no audio placeholder
 - [ ] Caps dialogo: 8 / 40 / 4000 enforced in UI
 - [ ] Form dialogo: bind `characters`, `turns`, `defaultGapMs`, campi turno
 - [ ] Player export labels WAV/MP3; ZIP solo `dialogo`
@@ -537,3 +557,4 @@ Schema file in arrivo nel repo; binding minimo per Sprint 2:
 | 2026-08-22 | 1.4 | Avatar filenames lock in `docs/ui/avatars/` (asset 3D, no redraw) |
 | 2026-08-22 | 1.5 | 2D lock: margine 8% busto, display 32/40 liste, iniziali su teal se mancante |
 | 2026-08-22 | 1.6 | Sprint 2: checklist implementazione Frontend + binding JSON camelCase |
+| 2026-08-22 | 1.7 | Copy keys lock IT upload/voce; JSON `name`/`avatar`; CTA Vai alle voci |
