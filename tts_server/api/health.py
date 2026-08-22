@@ -1,11 +1,10 @@
 from fastapi import APIRouter
-
-from tts_server.schemas import HealthOut
+from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["system"])
 
 
-@router.get("/health", response_model=HealthOut)
-def health() -> HealthOut:
-    """Public liveness probe — status only, no internals."""
-    return HealthOut(status="ok")
+@router.get("/health", include_in_schema=False)
+def health() -> JSONResponse:
+    """Public liveness probe — status only; no worker/model/device fields."""
+    return JSONResponse(content={"status": "ok"})

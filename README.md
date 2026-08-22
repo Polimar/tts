@@ -91,7 +91,7 @@ curl http://<IP-WINDOWS>:8765/health
 
 ### Health check
 
-`GET /health` — pubblico, senza auth. Risposta minima: `{"status":"ok","worker_ready":true}` (nessun path, secret o dump env).
+`GET /health` — pubblico, senza auth. Risposta minima: `{"status":"ok"}` (nessun path, secret, device o dump env).
 
 ---
 

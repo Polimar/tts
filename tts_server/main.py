@@ -5,7 +5,6 @@ from fastapi import FastAPI
 
 from tts_server.api import api_router
 from tts_server.api.health import router as health_router
-from tts_server.config import settings
 from tts_server.static_mount import mount_frontend
 from tts_server.worker.qwen3_worker import get_job_queue, get_worker
 
@@ -14,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from tts_server.config import settings
+
     settings.ensure_data_dir()
     worker = get_worker()
     worker.initialize()
@@ -25,11 +26,22 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    from tts_server.config import settings
+
+    doc_kwargs: dict[str, None] = {}
+    if not settings.debug_mode:
+        doc_kwargs = {
+            "docs_url": None,
+            "redoc_url": None,
+            "openapi_url": None,
+        }
+
     app = FastAPI(
         title="TTS Service",
         description="Local Qwen3-TTS voice cloning API",
         version="0.1.0",
         lifespan=lifespan,
+        **doc_kwargs,
     )
 
     # API + NPM health (no /api/v1 prefix for health)

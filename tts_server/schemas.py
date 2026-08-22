@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UserOut(BaseModel):
@@ -60,9 +60,13 @@ class JobOut(BaseModel):
 
 
 class HealthOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: str
 
 
 class DeviceInfoOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     device: str
     status: str

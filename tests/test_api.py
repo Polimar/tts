@@ -12,6 +12,8 @@ os.environ["MOCK_WORKER"] = "1"
 os.environ["JWT_SECRET"] = "test-jwt-secret"
 os.environ["API_KEY"] = "test-api-key"
 os.environ["QUEUE_POLL_SECONDS"] = "0.1"
+os.environ["DEBUG"] = "0"
+os.environ.pop("DEV", None)
 
 from tts_server.main import create_app
 
@@ -75,8 +77,40 @@ def test_health_public(client: TestClient):
 
 def test_static_index(client: TestClient):
     resp = client.get("/")
-    if resp.status_code == 200:
-        assert "html" in resp.text.lower()
+    assert resp.status_code == 200
+    assert "html" in resp.text.lower()
+    assert "TTS Studio" in resp.text
+    assert "/assets/" in resp.text
+
+
+def test_openapi_and_docs_disabled(client: TestClient):
+    assert client.get("/openapi.json").status_code == 404
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+
+
+def test_openapi_enabled_when_debug(tmp_path: Path):
+    os.environ["DATA_DIR"] = str(tmp_path / "data")
+    os.environ["DEBUG"] = "1"
+    from tts_server import config as config_module
+    from tts_server.db import database as db_module
+    from tts_server.worker import qwen3_worker as worker_module
+
+    config_module.settings = config_module.Settings()
+    db_module._db = None
+    db_module._db_bound_path = None
+    worker_module._worker = None
+    worker_module._queue = None
+
+    app = create_app()
+    with TestClient(app) as test_client:
+        resp = test_client.get("/openapi.json")
+        assert resp.status_code == 200
+        schema = resp.json()
+        health_paths = schema.get("paths", {}).get("/health")
+        assert health_paths is None
+        device_schema = schema["components"]["schemas"]["DeviceInfoOut"]["properties"]
+        assert set(device_schema.keys()) == {"device", "status"}
 
 
 def test_system_device_requires_auth(client: TestClient):
@@ -93,8 +127,11 @@ def test_system_device_minimal(client: TestClient):
     assert resp.status_code == 200
     body = resp.json()
     assert set(body.keys()) == {"device", "status"}
+    assert set(body.keys()) == {"device", "status"}
     assert body["device"] in {"cpu", "xpu"}
     assert body["status"] in {"ready", "initializing"}
+    assert "model_id" not in body
+    assert "xpu_gate" not in str(body)
 
 
 def test_register_requires_api_key(client: TestClient):

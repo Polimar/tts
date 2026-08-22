@@ -95,6 +95,7 @@ class Settings:
     mock_worker: bool
     queue_poll_seconds: float
     login_rate_limit_per_minute: int
+    debug_mode: bool
 
     def __init__(self) -> None:
         self.host = _env_str("HOST", "0.0.0.0")
@@ -116,6 +117,7 @@ class Settings:
         self.mock_worker = _env_bool("MOCK_WORKER", False)
         self.queue_poll_seconds = _env_float("QUEUE_POLL_SECONDS", 0.5)
         self.login_rate_limit_per_minute = _env_int("LOGIN_RATE_LIMIT_PER_MINUTE", 10)
+        self.debug_mode = _env_bool("DEBUG", False) or _env_bool("DEV", False)
 
     @property
     def users_dir(self) -> Path:
