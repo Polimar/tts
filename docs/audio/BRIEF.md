@@ -41,7 +41,7 @@ La webapp clona voci da campioni uploadati e sintetizza testo/libri/dialoghi in 
 | MIDI | `.mid`, `.midi` | Non audio PCM |
 | OGG / Opus | `.ogg`, `.opus` | **Posticipato** a v1.x — decode Opus non in scope v1 |
 
-Messaggio utente (IT): *«Formato non supportato. Usa WAV, FLAC, MP3 o M4A.»*
+Messaggio utente: chiave `errUploadFormat` (§7).
 
 ### Pre-processing ingest (obbligatorio)
 
@@ -65,20 +65,23 @@ Messaggio utente (IT): *«Formato non supportato. Usa WAV, FLAC, MP3 o M4A.»*
 
 Il job voce passa a stato **Errore** / **Bloccato** con messaggio user-facing. Nessun embedding generato.
 
-| Controllo | Soglia | Messaggio utente (IT) |
-|-----------|--------|------------------------|
-| Hard clipping | > **~1%** campioni a full scale (|sample| ≥ 0.99) | *«Audio distorto (clipping). Registra di nuovo con livelli più bassi.»* |
-| Loudness eccessiva | Integrated loudness **> −8 LUFS** | *«Audio troppo forte. Obiettivo parlato: circa −16 LUFS.»* |
-| Durata | < 8 s o > 90 s | *«Durata non valida (min 8 s, max 90 s).»* |
+| Controllo | Soglia | Chiave copy (§7) |
+|-----------|--------|------------------|
+| Hard clipping | > **~1%** campioni a full scale (|sample| ≥ 0.99) | `errUploadClip` |
+| Loudness eccessiva | Integrated loudness **> −8 LUFS** | `errUploadClip` |
+| Durata min | < **8 s** | `errUploadTooShort` |
+| Durata max | > **90 s** | `errUploadTooLong` |
+| Multi-speaker / musica | Euristica detector (v1) | `errUploadMultiSpeaker` |
+| Silenzio / nessun parlato | Livello parlato sotto soglia | `errUploadSilent` |
 
 ### QC — soft warn (job consentito)
 
 Il clone procede; UI mostra **avviso non bloccante** sulla card voce.
 
-| Controllo | Soglia / euristica | Messaggio utente (IT) |
-|-----------|-------------------|------------------------|
-| Noise floor alto | RMS in pause > **−40 dBFS** | *«Rumore di fondo elevato — la qualità del clone potrebbe calare.»* |
-| Musica rilevata | Flag euristica (detector TBD oltre soglia RMS pause) | *«Possibile musica di sottofondo — usa parlato pulito.»* |
+| Controllo | Soglia / euristica | Chiave copy (§7) |
+|-----------|-------------------|------------------|
+| Noise floor alto | RMS in pause > **−40 dBFS** | `warnUploadNoisy` |
+| Musica rilevata | Flag euristica (detector TBD oltre soglia RMS pause) | `errUploadMultiSpeaker` (hard reject) o warn dedicato in v1.x |
 
 > **Nota implementativa:** per v1 non serve un classifier ML musica/parlato. Il flag «musica» può derivare da euristica spettrale semplice **oltre** la soglia RMS pause; documentare l'euristica scelta in log, non in UI.
 
@@ -170,7 +173,8 @@ Se un turno referenzia voce non pronta o assente:
 
 - **Non** generare silenzio placeholder.
 - Turno / job resta **Bloccato** (stato coda UI).
-- Nessun fallback silenzioso — allineato al contratto Game Designer.
+- Nessun fallback silenzioso — copy `errVoiceMissing` / `errVoiceMissingJob` (§7).
+- CTA bloccato: **«Vai alle voci»** → `/voci`.
 
 ---
 
@@ -270,7 +274,69 @@ La velocità preview UI (playback rate) **non** altera i file generati — solo 
 
 ---
 
-## 7. Dipendenze cross-team
+## 7. Copy errori e hint (IT) — Frontend
+
+Stringhe user-facing **canoniche** per il Frontend. Chiavi in **camelCase EN**; copy in italiano — usare **esattamente** come sotto (il Frontend le binda 1:1).
+
+### Limiti ingest (invarianti)
+
+| Regola | Valore |
+|--------|--------|
+| Formati accettati | WAV, FLAC, MP3, M4A |
+| Durata | **8–90 s** (hint: **15–30 s**) |
+| Speaker | **Un solo parlante**, senza musica |
+| Canali | Stereo → downmix mono `L+R / 2` |
+| Sample rate modello | Resample **24 kHz** |
+| Hard reject | Clipping ~1% **oppure** loudness integrata **> −8 LUFS** |
+| Voce mancante | Job/turno **Bloccato** — **nessun** fallback silenzioso |
+| Gap default dialoghi | `defaultGapMs = 350` — **non** esposto in Impostazioni |
+
+### Tabella chiavi
+
+| Chiave | Copy (IT) |
+|--------|-----------|
+| `errUploadFormat` | Formato non supportato. Usa WAV, FLAC, MP3 o M4A. |
+| `errUploadTooShort` | Audio troppo corto. Serve almeno 8 secondi di parlato. |
+| `errUploadTooLong` | Audio troppo lungo. Massimo 90 secondi. |
+| `errUploadMultiSpeaker` | Sembra ci siano più voci. Carica un solo parlante, senza musica. |
+| `errUploadClip` | Audio distorto o troppo forte. Registra di nuovo senza clipping. |
+| `errUploadSilent` | Non sento parlato. Controlla microfono e volume. |
+| `warnUploadNoisy` | C'è molto rumore di fondo. Puoi usarlo, ma il clone uscirà meno pulito. |
+| `errVoiceMissing` | Manca la voce di questo personaggio. Vai alle Voci per clonarla. |
+| `errVoiceMissingJob` | Job bloccato: voce assente. Nessun silenzio al posto della voce. |
+| `errExportFailed` | Esportazione non riuscita. Riprova o scarica in WAV. |
+| `errStitchFailed` | Non ho potuto unire i turni. Controlla i gap e riprova. |
+| `hintUploadDuration` | 8–90 secondi, meglio 15–30. Un parlante, senza musica. |
+
+### CTA stato Bloccato
+
+| Elemento | Valore |
+|----------|--------|
+| Label | **Vai alle voci** |
+| Route | `/voci` |
+
+Usare insieme a `errVoiceMissing` (turno/dialogo editor) o `errVoiceMissingJob` (riga coda / dettaglio job).
+
+### Mapping evento → chiave (riferimento Backend)
+
+| Evento | Chiave |
+|--------|--------|
+| Estensione/container non supportato | `errUploadFormat` |
+| Durata < 8 s | `errUploadTooShort` |
+| Durata > 90 s | `errUploadTooLong` |
+| Clipping o loudness > −8 LUFS | `errUploadClip` |
+| Multi-speaker / musica rilevata (hard) | `errUploadMultiSpeaker` |
+| Nessun parlato rilevato | `errUploadSilent` |
+| Rumore di fondo alto (soft warn) | `warnUploadNoisy` |
+| Turno dialogo senza voce pronta | `errVoiceMissing` |
+| Job in coda bloccato per voce assente | `errVoiceMissingJob` |
+| Export WAV/MP3 fallito | `errExportFailed` |
+| Stitch turni fallito | `errStitchFailed` |
+| Placeholder / helper upload | `hintUploadDuration` |
+
+---
+
+## 8. Dipendenze cross-team
 
 | Team | Consuma da questo brief | Fornisce |
 |------|-------------------------|----------|
@@ -281,7 +347,7 @@ La velocità preview UI (playback rate) **non** altera i file generati — solo 
 
 ---
 
-## 8. Fuori scope (questo documento)
+## 9. Fuori scope (questo documento)
 
 - Implementazione codice Python / ffmpeg / PyTorch
 - Modifiche al peso Qwen3-TTS o training
@@ -302,6 +368,7 @@ La velocità preview UI (playback rate) **non** altera i file generati — solo 
 - [ ] Export WAV 16-bit 24 kHz mono; MP3 CBR 192k mono 24 kHz
 - [ ] Naming `{jobId}_{voiceOrDialogo}.ext` e `{jobId}_clips.zip`
 - [ ] Player usa stessi file dell'export; preview turno = clip dry
+- [ ] Copy IT §7 bindata 1:1 (chiavi camelCase EN)
 
 ### v1.1 aggiuntive
 
@@ -317,3 +384,4 @@ La velocità preview UI (playback rate) **non** altera i file generati — solo 
 | Data | Versione | Note |
 |------|----------|------|
 | 2026-08-22 | 1.0 | Prima stesura Sound Designer; allineamento `docs/ui/BRIEF.md` PR #1 |
+| 2026-08-22 | 1.1 | §7 copy errori/hint IT per Frontend (chiavi camelCase) |
