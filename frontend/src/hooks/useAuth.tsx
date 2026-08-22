@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import * as authApi from '../api/auth'
-import { getStoredToken, HttpError } from '../api/client'
+import { getStoredToken, HttpError, setStoredToken } from '../api/client'
 import type { User } from '../types/api'
 
 interface AuthContextValue {
@@ -36,10 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me)
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) {
-        setUser(null)
-      } else {
-        setUser(null)
+        setStoredToken(null)
       }
+      setUser(null)
     }
   }, [])
 

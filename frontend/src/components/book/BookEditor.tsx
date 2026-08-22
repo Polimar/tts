@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { HttpError } from '../../api/client'
 import { createJob } from '../../api/jobs'
 import type { Voice } from '../../types/api'
 
@@ -78,7 +77,7 @@ export function BookEditor({
   voiceId,
   onVoiceIdChange,
   onJobCreated,
-  onQueueFull,
+  onQueueFull: _onQueueFull,
   onError,
 }: BookEditorProps) {
   const [draft, setDraft] = useState<BookDraft>(loadDraft)
@@ -129,14 +128,9 @@ export function BookEditor({
       })
       onJobCreated(job.id)
     } catch (err: unknown) {
-      if (err instanceof HttpError && err.code === 'queue_full') {
-        onQueueFull(err.message)
-        setError(err.message)
-      } else {
-        const msg = err instanceof Error ? err.message : 'Impossibile creare il job.'
-        setError(msg)
-        onError?.(msg)
-      }
+      const msg = err instanceof Error ? err.message : 'Impossibile creare il job.'
+      setError(msg)
+      onError?.(msg)
     } finally {
       setSubmitting(false)
     }

@@ -4,13 +4,11 @@ const TOKEN_KEY = 'tts_token'
 
 export class HttpError extends Error {
   readonly status: number
-  readonly code: string
 
   constructor(status: number, body: ApiError) {
     super(body.detail)
     this.name = 'HttpError'
     this.status = status
-    this.code = body.code
   }
 }
 
@@ -26,22 +24,31 @@ export function setStoredToken(token: string | null): void {
   }
 }
 
+function detailFromBody(body: unknown): string {
+  if (!body || typeof body !== 'object') {
+    return 'Si è verificato un errore imprevisto.'
+  }
+  const record = body as Record<string, unknown>
+  if (typeof record.detail === 'string') return record.detail
+  if (Array.isArray(record.detail)) {
+    return record.detail
+      .map((item) => {
+        if (item && typeof item === 'object' && 'msg' in item) {
+          return String((item as { msg: unknown }).msg)
+        }
+        return String(item)
+      })
+      .join('; ')
+  }
+  return 'Si è verificato un errore imprevisto.'
+}
+
 async function parseError(response: Response): Promise<ApiError> {
   try {
-    const body = (await response.json()) as { detail?: string | { msg?: string }[]; code?: string }
-    let detail = 'Si è verificato un errore imprevisto.'
-    if (typeof body.detail === 'string') {
-      detail = body.detail
-    } else if (Array.isArray(body.detail) && body.detail.length > 0) {
-      detail = body.detail.map((item) => item.msg ?? String(item)).join(', ')
-    }
-    return {
-      code: body.code ?? `http_${response.status}`,
-      detail,
-    }
+    const body = await response.json()
+    return { detail: detailFromBody(body) }
   } catch {
     return {
-      code: 'errore_rete',
       detail: `Richiesta fallita (${response.status}).`,
     }
   }

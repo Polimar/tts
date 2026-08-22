@@ -1,19 +1,26 @@
-# Frontend TTS
+# TTS Studio — Frontend
 
-UI italiana (Vite + React). Proxy dev: `/api/v1` → `:8765`.
+UI italiana (Vite + React). Contratto API: `docs/API.md` (PR #12).
 
-## Game Dev Web
-
-Integrato negli extension point Frontend:
-
-| Entry point | Componente |
-|-------------|------------|
-| `AudioPlayer.waveformSlot` | `WaveformSlot` — forma d'onda seekable |
-| `data-gdw-book-editor` | `BookEditor` — modalità Libro in `/nuovo` |
-| `useActiveJobsPolling` | Backoff 1.5–3s su job `queued`/`running` |
-
-Export: `src/gameDevWeb.ts`
+## Sviluppo
 
 ```bash
-npm install && npm run dev && npm run build
+cd frontend && npm install && npm run dev
 ```
+
+Proxy Vite verso `http://localhost:8765`: `/auth`, `/voices`, `/jobs`, `/health`, `/system`.
+
+Auth: **Bearer token** in `localStorage`. Registrazione: header `X-API-Key` se `VITE_REGISTER_API_KEY` (o `VITE_REGISTRATION_API_KEY`) è impostata; altrimenti richiede `ALLOW_PUBLIC_REGISTRATION=1` sul backend.
+
+## Produzione (same-origin)
+
+```bash
+npm run build
+MOCK_WORKER=1 ALLOW_PUBLIC_REGISTRATION=1 uvicorn tts_server.main:app --host 0.0.0.0 --port 8765
+```
+
+## Extension points (Game Dev Web)
+
+- `WaveformSlot` / `data-gdw-waveform-container`
+- `BookEditor` / `data-gdw-book-editor`
+- `useJobPolling` / `useActiveJobsPolling`

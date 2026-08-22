@@ -1,7 +1,10 @@
 import { apiFetch, setStoredToken } from './client'
 import type { AuthResponse, LoginRequest, RegisterRequest, User } from '../types/api'
 
-const REGISTRATION_API_KEY = import.meta.env.VITE_REGISTRATION_API_KEY ?? ''
+const REGISTRATION_API_KEY =
+  import.meta.env.VITE_REGISTER_API_KEY ??
+  import.meta.env.VITE_REGISTRATION_API_KEY ??
+  ''
 
 export function getMe(): Promise<User> {
   return apiFetch<User>('/auth/me')
