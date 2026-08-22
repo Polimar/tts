@@ -9,14 +9,14 @@ import retrofit2.http.Path
 import retrofit2.http.Streaming
 
 /**
- * Download audio WAV con supporto HTTP Range (`/api/v1/jobs/{id}/audio`).
+ * Download/stream audio WAV autenticato con supporto HTTP Range (`/api/v1/jobs/{job_id}/audio`).
  */
 interface AudioApi {
     @Streaming
-    @GET("jobs/{id}/audio")
+    @GET("jobs/{job_id}/audio")
     @Headers("Accept: audio/wav")
-    suspend fun getAudio(
-        @Path("id") jobId: String,
+    suspend fun getJobAudio(
+        @Path("job_id") jobId: String,
         @Header("Range") range: String? = null,
     ): Response<ResponseBody>
 }

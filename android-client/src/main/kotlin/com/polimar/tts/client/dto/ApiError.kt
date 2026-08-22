@@ -1,5 +1,6 @@
 package com.polimar.tts.client.dto
 
+import com.polimar.tts.client.types.ErrorCode
 import com.squareup.moshi.Json
 
 /**
@@ -7,7 +8,7 @@ import com.squareup.moshi.Json
  */
 data class ApiError(
     @Json(name = "code")
-    val code: String,
+    val code: ErrorCode,
 
     @Json(name = "detail")
     val detail: String,

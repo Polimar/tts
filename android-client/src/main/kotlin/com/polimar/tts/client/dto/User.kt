@@ -2,7 +2,7 @@ package com.polimar.tts.client.dto
 
 import com.squareup.moshi.Json
 
-data class UserResponse(
+data class User(
     @Json(name = "id")
     val id: String,
 
@@ -10,5 +10,5 @@ data class UserResponse(
     val email: String,
 
     @Json(name = "created_at")
-    val createdAt: String? = null,
+    val createdAt: String,
 )

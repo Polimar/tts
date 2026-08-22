@@ -1,17 +1,21 @@
 package com.polimar.tts.client.dto
 
+import com.polimar.tts.client.types.SourceType
 import com.squareup.moshi.Json
 
 data class CreateJobRequest(
     @Json(name = "voice_id")
     val voiceId: String,
 
+    @Json(name = "source_type")
+    val sourceType: SourceType,
+
     @Json(name = "text")
-    val text: String,
+    val text: String? = null,
 
-    @Json(name = "job_type")
-    val jobType: String? = "text",
+    @Json(name = "chapter_id")
+    val chapterId: String? = null,
 
-    @Json(name = "speed")
-    val speed: Double? = null,
+    @Json(name = "title")
+    val title: String? = null,
 )
