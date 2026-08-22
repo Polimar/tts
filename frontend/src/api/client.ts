@@ -4,13 +4,11 @@ const TOKEN_KEY = 'tts_token'
 
 export class HttpError extends Error {
   readonly status: number
-  readonly code: string
 
   constructor(status: number, body: ApiError) {
     super(body.detail)
     this.name = 'HttpError'
     this.status = status
-    this.code = body.code
   }
 }
 
@@ -28,23 +26,19 @@ export function setStoredToken(token: string | null): void {
 
 async function parseError(response: Response): Promise<ApiError> {
   try {
-    const body = (await response.json()) as { detail?: string | { msg?: string }[]; code?: string }
-    let detail = 'Si è verificato un errore imprevisto.'
+    const body = (await response.json()) as { detail?: string | { msg?: string }[] }
     if (typeof body.detail === 'string') {
-      detail = body.detail
-    } else if (Array.isArray(body.detail) && body.detail.length > 0) {
-      detail = body.detail.map((item) => item.msg ?? String(item)).join(', ')
+      return { detail: body.detail }
     }
-    return {
-      code: body.code ?? `http_${response.status}`,
-      detail,
+    if (Array.isArray(body.detail) && body.detail.length > 0) {
+      return {
+        detail: body.detail.map((item) => item.msg ?? String(item)).join(', '),
+      }
     }
   } catch {
-    return {
-      code: 'errore_rete',
-      detail: `Richiesta fallita (${response.status}).`,
-    }
+    // ignore JSON parse errors
   }
+  return { detail: `Richiesta fallita (${response.status}).` }
 }
 
 function authHeaders(): Record<string, string> {

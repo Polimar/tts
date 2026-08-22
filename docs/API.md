@@ -1,469 +1,365 @@
-# Contratto HTTP API (v1)
+# Contratto HTTP API (live backend)
 
-Base URL: `http://<host>:8765/api/v1`
+> **SUPERSEDED:** Il draft v1 in PR #3 (`/api/v1`, cookie `tts_session`, campo `email`) è obsoleto. Il contratto canonico è il backend live in PR #10 (`tts_server` su `0.0.0.0:8765`). Usare solo questo documento e `openapi.yaml`.
 
-Autenticazione predefinita: **cookie di sessione** `tts_session` (impostato da login/register). I client devono inviare cookie su ogni richiesta (`credentials: 'include'` in fetch).
+**Base URL:** `http://<host>:8765` — **nessun** prefisso `/api` o `/api/v1`.
 
-Formato errori comune (tutti gli status 4xx/5xx salvo dove indicato):
+**UI:** in produzione same-origin su `:8765` (SPA + API stesso host/porta). In sviluppo il frontend Vite usa un proxy verso `:8765`.
+
+---
+
+## Autenticazione
+
+| Meccanismo | Dettaglio |
+|---|---|
+| Trasporto | Header `Authorization: Bearer <token>` |
+| Token | Restituito da `POST /auth/register` e `POST /auth/login` in `AuthResponse.token` |
+| Scadenza | `AuthResponse.expires_at` (ISO 8601 UTC) |
+| Register | Richiede header `X-API-Key: <API_KEY>` (valore da env server `API_KEY`) |
+| Cookie | **Nessun** cookie `tts_session` in v2 |
+
+Identità utente: campo **`username`** (non `email`).
+
+### Header comuni
+
+```http
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+Per register:
+
+```http
+X-API-Key: <API_KEY>
+Content-Type: application/json
+```
+
+Per upload voce (multipart):
+
+```http
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+### Formato errori (FastAPI default)
 
 ```json
 {
-  "code": "invalid_credentials",
-  "detail": "Email o password non validi."
+  "detail": "Invalid credentials"
+}
+```
+
+Oppure per errori di validazione Pydantic:
+
+```json
+{
+  "detail": [
+    {
+      "type": "string_too_short",
+      "loc": ["body", "password"],
+      "msg": "String should have at least 8 characters",
+      "input": "short"
+    }
+  ]
 }
 ```
 
 | HTTP | Uso tipico |
-|------|------------|
-| 401 | Sessione assente o scaduta |
-| 403 | Autenticato ma risorsa di altro utente |
-| 409 | Conflitto (email duplicata, coda piena, voce in uso) |
-| 422 | Validazione input |
-| 429 | Rate limit (riservato; non usato in v1 salvo abuso) |
+|---|---|
+| 400 | Input non valido, id malformato |
+| 401 | Non autenticato, token scaduto, `X-API-Key` mancante/errato su register |
+| 404 | Risorsa non trovata (o voce/job di altro utente → 404, non 403) |
+| 409 | Username duplicato, job non completato per download |
+| 413 | Upload audio troppo grande |
+| 429 | Rate limit login (`LOGIN_RATE_LIMIT_PER_MINUTE`) |
 
 ---
 
-## AUTH
+## Tipi JSON (allineati a `tts_server/schemas.py`)
 
-### `POST /auth/register`
-
-Crea utente e apre sessione (cookie).
-
-**Request**
+### `UserOut`
 
 ```json
 {
-  "email": "mario.rossi@example.com",
-  "password": "Sicura123!"
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "username": "mario",
+  "created_at": "2026-08-22T10:00:00+00:00"
 }
 ```
 
-**Response `201 Created`**
+### `AuthResponse`
 
 ```json
 {
+  "token": "urlsafe-base64-token",
+  "expires_at": "2026-08-29T10:00:00+00:00",
   "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "mario.rossi@example.com",
-    "created_at": "2026-08-22T10:00:00Z"
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "username": "mario",
+    "created_at": "2026-08-22T10:00:00+00:00"
   }
 }
 ```
 
-`Set-Cookie: tts_session=<session_id>; HttpOnly; Path=/; SameSite=Lax`
+### `VoiceOut`
 
-**Errori**
+```json
+{
+  "id": "voice-id",
+  "name": "Mia voce",
+  "ref_text": "Testo letto nel campione audio",
+  "language": "Italian",
+  "created_at": "2026-08-22T10:05:00+00:00"
+}
+```
 
-- `409` — `email_already_exists`: `"Esiste già un account con questa email."`
-- `422` — `validation_error`: `"La password deve contenere almeno 8 caratteri."`
+### `JobOut`
+
+```json
+{
+  "id": "job-id",
+  "voice_id": "voice-id",
+  "status": "queued",
+  "language": "Italian",
+  "text": "Testo da sintetizzare.",
+  "chunk_count": 0,
+  "error": null,
+  "wav_available": false,
+  "mp3_available": false,
+  "device_used": null,
+  "created_at": "2026-08-22T10:10:00+00:00",
+  "started_at": null,
+  "completed_at": null
+}
+```
+
+`status`: **`queued` | `running` | `completed` | `failed`** (non `done`).
+
+`wav_available` / `mp3_available`: booleani derivati dalla presenza del file export (non status testuali).
+
+### `HealthOut`
+
+```json
+{
+  "status": "ok",
+  "worker_ready": true
+}
+```
+
+### `DeviceInfoOut` (route `/system/device`, autenticata)
+
+```json
+{
+  "device": "cpu",
+  "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+  "xpu_gate_passed": false,
+  "xpu_gate_reason": "TTS_DEVICE=cpu (default)",
+  "xpu_memory_bytes": 0,
+  "cpu_warmup_seconds": 12.5,
+  "xpu_warmup_seconds": null
+}
+```
+
+---
+
+## Endpoint
+
+### `GET /health`
+
+Pubblico. Nessuna auth.
+
+**Response `200`:** `HealthOut`
+
+---
+
+### `POST /auth/register`
+
+Crea utente e restituisce token Bearer.
+
+**Headers:** `X-API-Key: <API_KEY>` obbligatorio.
+
+**Body (`RegisterRequest`):**
+
+```json
+{
+  "username": "mario",
+  "password": "password123"
+}
+```
+
+| Campo | Vincoli |
+|---|---|
+| `username` | string, min 3, max 64 |
+| `password` | string, min 8, max 128 |
+
+**Response `201`:** `AuthResponse`
+
+**Errori:** `401` (API key), `409` (`Username already exists`), `422` (validazione)
 
 ---
 
 ### `POST /auth/login`
 
-**Request**
+**Body (`LoginRequest`):**
 
 ```json
 {
-  "email": "mario.rossi@example.com",
-  "password": "Sicura123!"
+  "username": "mario",
+  "password": "password123"
 }
 ```
 
-**Response `200 OK`**
+**Response `200`:** `AuthResponse`
 
-```json
-{
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "mario.rossi@example.com",
-    "created_at": "2026-08-22T10:00:00Z"
-  }
-}
-```
-
-**Errori**
-
-- `401` — `invalid_credentials`: `"Email o password non validi."`
-- `422` — `validation_error`
+**Errori:** `401` (`Invalid credentials`), `429` (rate limit per IP)
 
 ---
 
 ### `POST /auth/logout`
 
-Invalida la sessione corrente.
+**Auth:** Bearer obbligatorio.
 
-**Request**: corpo vuoto.
-
-**Response `204 No Content`**
-
-`Set-Cookie: tts_session=; Max-Age=0`
-
-**Errori**
-
-- `401` se non autenticato (opzionale; può restituire 204 comunque)
+**Response `204`:** body vuoto. Invalida il token corrente.
 
 ---
 
 ### `GET /auth/me`
 
-**Response `200 OK`**
+**Auth:** Bearer obbligatorio.
 
-```json
-{
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "mario.rossi@example.com",
-    "created_at": "2026-08-22T10:00:00Z"
-  }
-}
-```
-
-**Errori**
-
-- `401` — `not_authenticated`: `"Sessione non valida o scaduta."`
-
----
-
-## VOICES
-
-Tutti gli endpoint richiedono autenticazione. L'utente vede e modifica **solo** le proprie voci.
-
-### `GET /voices`
-
-**Response `200 OK`**
-
-```json
-{
-  "items": [
-    {
-      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-      "name": "Voce narratore",
-      "duration_sec": 12.4,
-      "created_at": "2026-08-22T10:05:00Z"
-    }
-  ],
-  "total": 1
-}
-```
+**Response `200`:** `UserOut`
 
 ---
 
 ### `POST /voices`
 
-Crea voce da audio di riferimento.
+Crea voce da campione audio (multipart).
 
-**Content-Type**: `multipart/form-data`
+**Auth:** Bearer obbligatorio.
 
-| Campo | Tipo | Obbligatorio |
-|-------|------|--------------|
-| `name` | string | sì |
-| `reference_audio` | file | sì |
+**Body:** `multipart/form-data`
 
-**Tipi MIME accettati**: `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/x-m4a`  
-**Dimensione massima**: 20 MB (20 971 520 byte)
+| Campo | Tipo | Obbligatorio | Note |
+|---|---|---|---|
+| `name` | string (form) | sì | Nome visualizzato |
+| `ref_text` | string (form) | sì | Testo corrispondente all'audio |
+| `language` | string (form) | no | Default `Italian` |
+| `audio` | file | sì | **Non** `reference_audio` |
 
-**Response `201 Created`**
+Formati audio ammessi: `.wav`, `.mp3`, `.flac`, `.ogg`, `.m4a`. Max size: `MAX_UPLOAD_BYTES` (default 20 MB).
 
-```json
-{
-  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "name": "Voce narratore",
-  "duration_sec": 12.4,
-  "created_at": "2026-08-22T10:05:00Z"
-}
-```
+**Response `201`:** `VoiceOut`
 
-**Errori**
+---
 
-- `422` — `invalid_audio_type`: `"Formato audio non supportato."`
-- `422` — `file_too_large`: `"Il file supera la dimensione massima di 20 MB."`
-- `422` — `audio_too_short` / `audio_too_long`: durata fuori range 3–60 s
+### `GET /voices`
+
+**Auth:** Bearer obbligatorio.
+
+**Response `200`:** array di `VoiceOut`
 
 ---
 
 ### `GET /voices/{voice_id}`
 
-**Response `200 OK`**
+**Auth:** Bearer obbligatorio.
 
-```json
-{
-  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "name": "Voce narratore",
-  "duration_sec": 12.4,
-  "created_at": "2026-08-22T10:05:00Z"
-}
-```
+**Response `200`:** `VoiceOut`
 
-**Errori**
-
-- `404` — `voice_not_found`
-- `403` — `forbidden` se `voice_id` appartiene a altro utente
+**Errori:** `400` (id non valido), `404`
 
 ---
 
 ### `DELETE /voices/{voice_id}`
 
-**Response `204 No Content`**
+**Auth:** Bearer obbligatorio.
 
-**Errori**
-
-- `404` — `voice_not_found`
-- `409` — `voice_in_use`: `"Impossibile eliminare: la voce è usata da un job in coda o in esecuzione."`
+**Response `204`:** body vuoto.
 
 ---
 
-## JOBS (coda TTS)
-
-### Policy coda
-
-- **Un solo** job con `status: "running"` (slot GPU).
-- Job aggiuntivi entrano in coda FIFO (`status: "queued"`, `queue_position` ≥ 1).
-- Massimo **10** job in coda globale; oltre → `409 queue_full`.
-- Stati: `queued` | `running` | `done` | `failed` | `cancelled`.
-
 ### `POST /jobs`
 
-**Request** (testo libero)
+Accoda sintesi TTS.
+
+**Auth:** Bearer obbligatorio.
+
+**Body (`JobCreateRequest`):**
 
 ```json
 {
-  "voice_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "source_type": "text",
-  "text": "C'era una volta, in un regno lontano...",
-  "title": "Prova capitolo 1"
+  "voice_id": "voice-id",
+  "text": "Testo da sintetizzare.",
+  "language": "Italian"
 }
 ```
 
-**Request** (capitolo libro — quando implementato)
+| Campo | Obbligatorio | Default |
+|---|---|---|
+| `voice_id` | sì | — |
+| `text` | sì | min length 1 |
+| `language` | no | `Italian` |
 
-```json
-{
-  "voice_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "source_type": "chapter",
-  "chapter_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "title": "Capitolo 3"
-}
-```
+**Response `201`:** `JobOut` con `status: "queued"`
 
-| Campo | Tipo | Obbligatorio | Note |
-|-------|------|--------------|------|
-| `voice_id` | uuid | sì | Deve appartenere all'utente |
-| `source_type` | enum | sì | `text` \| `chapter` |
-| `text` | string | se `text` | Max 50 000 caratteri |
-| `chapter_id` | uuid | se `chapter` | |
-| `title` | string | no | Max 200 caratteri |
-
-**Response `201 Created`**
-
-```json
-{
-  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "voice_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "status": "queued",
-  "source_type": "text",
-  "title": "Prova capitolo 1",
-  "progress": 0,
-  "queue_position": 2,
-  "error_code": null,
-  "error_detail": null,
-  "created_at": "2026-08-22T10:10:00Z",
-  "started_at": null,
-  "finished_at": null
-}
-```
-
-**Errori**
-
-- `404` — `voice_not_found`
-- `404` — `chapter_not_found`
-- `409` — `queue_full`: `"La coda di sintesi è piena. Riprova più tardi."`
-- `422` — `validation_error`
+**Errori:** `400` (testo vuoto o oltre `MAX_TEXT_CHARS`), `404` (voce non trovata)
 
 ---
 
 ### `GET /jobs`
 
-Lista job dell'utente corrente, più recenti prima.
+**Auth:** Bearer obbligatorio.
 
-**Query**
-
-| Param | Default | Descrizione |
-|-------|---------|-------------|
-| `status` | (tutti) | Filtra: `queued`, `running`, `done`, `failed`, `cancelled` |
-| `limit` | 20 | Max 100 |
-| `offset` | 0 | |
-
-**Response `200 OK`**
-
-```json
-{
-  "items": [
-    {
-      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-      "voice_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-      "status": "running",
-      "source_type": "text",
-      "title": "Prova capitolo 1",
-      "progress": 0.35,
-      "queue_position": null,
-      "error_code": null,
-      "error_detail": null,
-      "created_at": "2026-08-22T10:10:00Z",
-      "started_at": "2026-08-22T10:10:05Z",
-      "finished_at": null
-    }
-  ],
-  "total": 1,
-  "limit": 20,
-  "offset": 0
-}
-```
+**Response `200`:** array di `JobOut`
 
 ---
 
 ### `GET /jobs/{job_id}`
 
-**Response `200 OK`**
+**Auth:** Bearer obbligatorio. Polling per aggiornare `status` fino a `completed` o `failed`.
 
-```json
-{
-  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "voice_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "status": "done",
-  "source_type": "text",
-  "title": "Prova capitolo 1",
-  "progress": 1,
-  "queue_position": null,
-  "error_code": null,
-  "error_detail": null,
-  "audio_ready": true,
-  "created_at": "2026-08-22T10:10:00Z",
-  "started_at": "2026-08-22T10:10:05Z",
-  "finished_at": "2026-08-22T10:12:30Z"
-}
-```
-
-Job fallito:
-
-```json
-{
-  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "voice_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "status": "failed",
-  "source_type": "text",
-  "title": "Prova capitolo 1",
-  "progress": 0.12,
-  "queue_position": null,
-  "error_code": "synthesis_failed",
-  "error_detail": "Errore durante la sintesi vocale.",
-  "audio_ready": false,
-  "created_at": "2026-08-22T10:10:00Z",
-  "started_at": "2026-08-22T10:10:05Z",
-  "finished_at": "2026-08-22T10:10:20Z"
-}
-```
-
-**Errori**
-
-- `404` — `job_not_found`
-- `403` — `forbidden`
+**Response `200`:** `JobOut`
 
 ---
 
-### `POST /jobs/{job_id}/cancel`
+### `GET /jobs/{job_id}/download/wav`
 
-Annulla solo se `status === "queued"`.
+**Auth:** Bearer obbligatorio.
 
-**Response `200 OK`**
+**Response `200`:** file `audio/wav` (stream binario)
 
-```json
-{
-  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "status": "cancelled",
-  "queue_position": null,
-  "finished_at": "2026-08-22T10:11:00Z"
-}
-```
-
-**Errori**
-
-- `404` — `job_not_found`
-- `409` — `job_not_cancellable`: `"Solo i job in coda possono essere annullati."`
+**Errori:** `409` se `status != completed`, `404` se WAV non disponibile
 
 ---
 
-## AUDIO
+### `GET /jobs/{job_id}/download/mp3`
 
-### `GET /jobs/{job_id}/audio`
+**Auth:** Bearer obbligatorio.
 
-Scarica o stream dell'audio sintetizzato. Richiede auth; solo owner del job.
+**Response `200`:** file `audio/mpeg` (stream binario)
 
-**Precondizione**: `status === "done"` e file presente.
-
-**Response `200 OK`**
-
-```
-Content-Type: audio/wav
-Content-Length: <bytes>
-Accept-Ranges: bytes
-```
-
-Corpo: file WAV binario.
-
-**Range** (opzionale ma supportato)
-
-```
-GET /jobs/{job_id}/audio
-Range: bytes=0-1023
-```
-
-**Response `206 Partial Content`**
-
-```
-Content-Type: audio/wav
-Content-Range: bytes 0-1023/524288
-Content-Length: 1024
-```
-
-**Errori**
-
-- `404` — `job_not_found` o `audio_not_ready`: `"L'audio non è ancora disponibile."`
-- `403` — `forbidden`
-- `401` — `not_authenticated`
+**Errori:** `409` se `status != completed`, `404` se MP3 non disponibile
 
 ---
 
-## Codici errore stabili (`code`)
+### `GET /system/device`
 
-| `code` | HTTP | Descrizione |
-|--------|------|-------------|
-| `not_authenticated` | 401 | Sessione mancante/scaduta |
-| `invalid_credentials` | 401 | Login fallito |
-| `forbidden` | 403 | Accesso negato alla risorsa |
-| `voice_not_found` | 404 | Voce inesistente |
-| `job_not_found` | 404 | Job inesistente |
-| `chapter_not_found` | 404 | Capitolo inesistente |
-| `audio_not_ready` | 404 | Audio non pronto |
-| `email_already_exists` | 409 | Registrazione duplicata |
-| `queue_full` | 409 | Coda GPU piena |
-| `voice_in_use` | 409 | Voce legata a job attivi |
-| `job_not_cancellable` | 409 | Cancel non consentito |
-| `validation_error` | 422 | Input non valido |
-| `invalid_audio_type` | 422 | MIME non accettato |
-| `file_too_large` | 422 | File troppo grande |
-| `internal_error` | 500 | Errore server |
+Info worker/device (debug/ops). **Auth:** Bearer obbligatorio.
+
+**Response `200`:** `DeviceInfoOut`
+
+**Errori:** `503` se worker non inizializzato
 
 ---
 
-## Enum di riferimento
+## Flusso frontend (cheat sheet)
 
-**`job.status`**: `queued` | `running` | `done` | `failed` | `cancelled`
+1. **Register** (solo setup/admin): `POST /auth/register` + `X-API-Key` → salva `token`.
+2. **Login**: `POST /auth/login` con `{username, password}` → salva `token`.
+3. Tutte le chiamate protette: `Authorization: Bearer ${token}`.
+4. **Crea voce**: `POST /voices` multipart (`name`, `ref_text`, `language`, `audio`).
+5. **Sintesi**: `POST /jobs` con `{voice_id, text, language?}`.
+6. **Poll**: `GET /jobs/{id}` fino a `status === "completed"` o `"failed"`.
+7. **Download**: se `wav_available` → `GET /jobs/{id}/download/wav`; se `mp3_available` → `GET /jobs/{id}/download/mp3`.
 
-**`job.source_type`**: `text` | `chapter`
-
----
-
-## OpenAPI
-
-Specifica completa in [`openapi.yaml`](../openapi.yaml) alla root del repository.
+**Isolamento utenti:** accesso a voce/job di altro utente restituisce `404` (non `403`).

@@ -1,248 +1,136 @@
-# Architettura TTS (v1)
+# Architettura TTS (live backend)
 
-Documento di riferimento per backend, frontend web e futuri client (Android/iOS). Il repository al momento contiene solo questo README e le specifiche; l'implementazione seguirà questi contratti.
+> **SUPERSEDED:** PR #3 documentava un contratto v1 con `/api/v1`, cookie `tts_session` e campo `email`. Obsoleto. Questo documento descrive il backend live in PR #10 (`tts_server`).
 
-## Obiettivo prodotto
+## Panoramica
 
-Webapp open source per clonazione vocale italiana: l'utente carica un audio di riferimento, inserisce testo (o seleziona un capitolo di un libro), e il sistema sintetizza la voce con **Qwen3-TTS 0.6B Base** su **Intel Arc (torch.xpu)**. Deploy previsto in locale e su `tts.alevale.it`.
-
-## Vincoli non negoziabili
-
-| Vincolo | Valore |
-|---------|--------|
-| Bind server | `0.0.0.0:8765` |
-| Stack | FastAPI + Vite/React + SQLite |
-| Voci utente | `data/users/<user_id>/voices/` |
-| GPU | **Un solo job di sintesi in stato `running`** |
-| Auth | Email + password |
-| UI (v1) | Solo italiano, solo web |
-| Engine | Qwen3-TTS 0.6B Base su `torch.xpu` |
-| Startup assert | Il processo deve fallire se XPU non ha allocato memoria per il modello |
-
-## Topologia processi
+Applicazione monolitica Python: **FastAPI** + **worker Qwen3-TTS** + **coda seriale** + **SQLite**. Un processo `uvicorn` espone l'API su **`0.0.0.0:8765`** (configurabile via `HOST` / `PORT`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Processo unico: uvicorn (FastAPI) @ 0.0.0.0:8765             │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ HTTP API     │  │ Static SPA   │  │ Job executor         │  │
-│  │ /api/v1/*    │  │ (prod only)  │  │ (thread asyncio)     │  │
-│  └──────┬───────┘  └──────────────┘  └──────────┬───────────┘  │
-│         │                                        │              │
-│         ▼                                        ▼              │
-│  ┌──────────────┐                      ┌──────────────────────┐ │
-│  │ SQLite       │◄─────────────────────│ Qwen3-TTS su XPU     │ │
-│  │ tts.db       │   stato job / coda   │ (1 slot GPU)         │ │
-│  └──────────────┘                      └──────────────────────┘ │
+│  uvicorn @ 0.0.0.0:8765 (same-origin UI in produzione)          │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
+│  │ HTTP API     │  │ (SPA static) │  │ JobQueue + Qwen3Worker │ │
+│  │ FastAPI      │  │ produzione   │  │ inference seriale      │ │
+│  └──────┬───────┘  └──────────────┘  └───────────┬────────────┘ │
+│         │                                         │             │
+│         ▼                                         ▼             │
+│  ┌──────────────┐                        ┌────────────────────┐ │
+│  │ SQLite       │                        │ DATA_DIR/users/    │ │
+│  │ tts.db       │                        │ audio + export     │ │
+│  └──────────────┘                        └────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Perché un solo processo (no worker separato)
+| Componente | Percorso codice | Ruolo |
+|---|---|---|
+| App entry | `tts_server/main.py` | Lifespan: init worker, avvio coda |
+| Router | `tts_server/api/` | Route HTTP (no prefisso `/api/v1`) |
+| Auth | `tts_server/auth/` | Register/login, Bearer token |
+| Schemi | `tts_server/schemas.py` | **Contratto JSON canonico** |
+| DB | `tts_server/db/database.py` | SQLite: users, sessions, voices, jobs |
+| Worker | `tts_server/worker/qwen3_worker.py` | Qwen3-TTS, chunking, export WAV/MP3 |
+| Config | `tts_server/config.py` | Env: `HOST`, `PORT`, `DATA_DIR`, secrets |
 
-- **Semplicità operativa**: un comando avvia API, coda e engine; adatto a installazione locale su una macchina con una GPU Intel Arc.
-- **Un solo slot GPU**: non serve un secondo processo; il vincolo «1 job running» è naturale in un executor in-process con lock.
-- **Persistenza**: SQLite tiene la coda e lo stato job; al riavvio il processo riprende i job `queued` e, se necessario, marca `running` interrotti come `failed`.
+## Contratto HTTP
 
-**Trade-off accettato**: durante la sintesi il thread CPU dell'executor è occupato; le richieste HTTP restano servite da altri worker uvicorn/async, ma la GPU non accetta un secondo job. Per v1 questo è sufficiente.
+- **Base:** root del server (`http://host:8765`), non `/api/v1`.
+- **Auth:** `Authorization: Bearer <token>` da `AuthResponse`. Nessun cookie di sessione.
+- **Identità:** `username` (non email). Modelli: `UserOut`, `AuthResponse`, `VoiceOut`, `JobOut`, `HealthOut`, `DeviceInfoOut` in `schemas.py`.
+- **Register:** richiede `X-API-Key` (static API key server-side).
 
-### Sviluppo vs produzione (frontend)
+### Route map
 
-| Modalità | Frontend | Backend |
-|----------|----------|---------|
-| **Sviluppo** | `vite dev` (porta separata, es. `5173`) con proxy verso `http://localhost:8765` | `uvicorn` su `0.0.0.0:8765` |
-| **Produzione** | Build statica (`frontend/dist`) servita da FastAPI (`StaticFiles` + fallback SPA) | Stesso processo su `0.0.0.0:8765` |
+| Path | Auth | Note |
+|---|---|---|
+| `GET /health` | no | Liveness pubblico |
+| `POST /auth/register` | `X-API-Key` | 201 + token |
+| `POST /auth/login` | no | Rate limit per IP |
+| `POST /auth/logout` | Bearer | 204 |
+| `GET /auth/me` | Bearer | |
+| `POST /voices` | Bearer | multipart: `name`, `ref_text`, `language`, `audio` |
+| `GET /voices` | Bearer | |
+| `GET /voices/{voice_id}` | Bearer | |
+| `DELETE /voices/{voice_id}` | Bearer | 204 |
+| `POST /jobs` | Bearer | body: `voice_id`, `text`, `language?` |
+| `GET /jobs` | Bearer | |
+| `GET /jobs/{job_id}` | Bearer | polling status |
+| `GET /jobs/{job_id}/download/wav` | Bearer | solo se `completed` |
+| `GET /jobs/{job_id}/download/mp3` | Bearer | solo se `completed` |
+| `GET /system/device` | Bearer | info device/worker |
 
-In dev il cookie di sessione richiede proxy Vite configurato con `changeOrigin` e `credentials: 'include'` lato client.
+## Autenticazione e sessioni
 
-## Autenticazione
+1. Register/login creano riga in `sessions` con `token` (url-safe random), `user_id`, `expires_at`.
+2. `get_current_user_id` valida Bearer token contro SQLite.
+3. Logout elimina la sessione per quel token.
+4. Scadenza default: `TOKEN_EXPIRE_HOURS` (168 h).
 
-**Scelta: sessione via cookie httpOnly** (non JWT bearer in header).
+Password: bcrypt via passlib. Login rate limit: sliding window per IP (`LOGIN_RATE_LIMIT_PER_MINUTE`).
 
-| Aspetto | Decisione |
-|---------|-----------|
-| Cookie | `tts_session`, `HttpOnly`, `SameSite=Lax`, `Secure` in produzione (HTTPS) |
-| Storage server | Tabella `sessions` in SQLite; token opaco (UUID o random 32 byte), hash in DB |
-| Scadenza | 30 giorni, sliding su ogni richiesta autenticata |
-| Password | Argon2id (o bcrypt se dipendenze limitate) |
-
-**Perché cookie e non JWT**
-
-- Il client v1 è una SPA sullo stesso origin in produzione: i cookie httpOnly riducono il rischio XSS rispetto a `localStorage`.
-- Nessun refresh token da gestire in v1.
-- I futuri client mobile possono usare lo stesso endpoint con cookie jar o, in una fase successiva, un endpoint dedicato che restituisce un token di sessione esplicito (fuori scope v1).
-
-**Isolamento**: ogni query su `voices`, `jobs`, `books` filtra per `user_id` derivato dalla sessione. Nessun ID globale esposto senza controllo ownership.
-
-## Layout storage su disco
+## Ciclo di vita job
 
 ```
-data/
-├── tts.db                          # SQLite
+queued → running → completed | failed
+```
+
+1. `POST /jobs` inserisce job `queued`, testo eventualmente spezzato in chunk (`CHUNK_MAX_CHARS`).
+2. `JobQueue` (thread background) prende un job alla volta (**coda seriale**).
+3. Worker sintetizza chunk, concatena, scrive WAV; opzionalmente MP3.
+4. DB aggiorna `status`, `chunk_count`, `device_used`, `wav_rel_path` / `mp3_rel_path`, timestamp.
+5. Client poll `GET /jobs/{id}`; quando `status === "completed"` e `wav_available`/`mp3_available`, scarica da `/download/wav` o `/download/mp3`.
+
+`JobOut.wav_available` e `JobOut.mp3_available` riflettono presenza file su disco (non sono valori di `status`).
+
+## Worker e device
+
+- Modello: `Qwen/Qwen3-TTS-12Hz-0.6B-Base` (`MODEL_ID`).
+- Default device: **CPU** (`TTS_DEVICE=cpu`). Percorso locale supportato su Windows.
+- XPU: gate fail-closed — richiede warmup generate completo; su Arc 140T testato NO-GO.
+- `MOCK_WORKER=1`: sintesi mock per test/dev senza GPU/modello.
+- `GPU_QUEUE_WORKERS=1`: un job inference attivo sul device.
+
+## Persistenza (`DATA_DIR`)
+
+Default **fuori repository** (vedi `tts_server/config.py`):
+
+| OS | Path default |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Polimar\tts` |
+| Linux | `~/.local/share/polimar-tts` |
+
+```
+<DATA_DIR>/
+├── tts.db
+├── warmup/
 └── users/
     └── <user_id>/
-        ├── voices/
-        │   └── <voice_id>/
-        │       ├── reference.wav     # audio caricato dall'utente
-        │       └── meta.json         # opzionale: durata, nome originale file
-        └── jobs/
-            └── <job_id>/
-                └── output.wav        # audio sintetizzato
+        ├── voices/<voice_id>/   # reference audio
+        └── exports/<job_id>/   # WAV / MP3
 ```
 
-- I path in DB sono relativi a `data/` per portabilità.
-- Eliminazione voce: soft-delete in DB + rimozione directory se nessun job attivo la referenzia (policy: rifiutare delete se job `queued`/`running` usano quella voce → `409`).
+Permessi directory: owner-only (`0o700` su Unix).
 
-## Schema SQLite (sketch)
+## Deployment
 
-```sql
--- Utenti
-CREATE TABLE users (
-    id            TEXT PRIMARY KEY,  -- UUID
-    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
+| Ambiente | Frontend | Backend |
+|---|---|---|
+| **Sviluppo** | Vite dev server (es. `:5173`) con proxy verso `http://localhost:8765` | `uvicorn tts_server.main:app --host 0.0.0.0 --port 8765` |
+| **Produzione** | SPA statica same-origin su `:8765` | Stesso processo su `0.0.0.0:8765` |
+| **NPM / `tts.alevale.it`** | Via reverse proxy NPM → Windows box `:8765` | `HOST=0.0.0.0`, firewall LAN |
 
--- Sessioni (cookie tts_session → session_id)
-CREATE TABLE sessions (
-    id         TEXT PRIMARY KEY,
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_sessions_user ON sessions(user_id);
+Health check NPM: `GET /health` → `{"status":"ok","worker_ready":...}`.
 
--- Voci clonate
-CREATE TABLE voices (
-    id              TEXT PRIMARY KEY,
-    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name            TEXT NOT NULL,
-    reference_path  TEXT NOT NULL,   -- es. users/<uid>/voices/<vid>/reference.wav
-    duration_sec    REAL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_voices_user ON voices(user_id);
+## Sicurezza
 
--- Libri e capitoli (v1: schema pronto, API libri opzionale in v1.1)
-CREATE TABLE books (
-    id         TEXT PRIMARY KEY,
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title      TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE chapters (
-    id         TEXT PRIMARY KEY,
-    book_id    TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    title      TEXT NOT NULL,
-    text       TEXT NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_chapters_book ON chapters(book_id);
-
--- Coda sintesi TTS
-CREATE TABLE jobs (
-    id            TEXT PRIMARY KEY,
-    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    voice_id      TEXT NOT NULL REFERENCES voices(id),
-    status        TEXT NOT NULL CHECK (status IN ('queued','running','done','failed','cancelled')),
-    source_type   TEXT NOT NULL CHECK (source_type IN ('text','chapter')),
-    text          TEXT,                -- se source_type = 'text'
-    chapter_id    TEXT REFERENCES chapters(id),
-    title         TEXT,
-    progress      REAL DEFAULT 0,    -- 0.0 .. 1.0
-    error_code    TEXT,
-    error_detail  TEXT,
-    audio_path    TEXT,                -- users/<uid>/jobs/<jid>/output.wav
-    queue_position INTEGER,          -- FIFO; NULL se non in coda
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    started_at    TEXT,
-    finished_at   TEXT
-);
-CREATE INDEX idx_jobs_user_status ON jobs(user_id, status);
-CREATE INDEX idx_jobs_queue ON jobs(status, queue_position) WHERE status = 'queued';
-```
-
-## Coda GPU: una sintesi alla volta
-
-### Policy: FIFO persistita, un solo `running`
-
-1. **Creazione job** (`POST /api/v1/jobs`): inserisce riga con `status = 'queued'` e `queue_position` = max+1.
-2. **Executor** (loop all'avvio e dopo ogni job):
-   - Se esiste già un job `running`, non avviarne altri.
-   - Altrimenti prende il job `queued` con `queue_position` minimo, lo marca `running`, esegue sintesi su XPU, poi `done` o `failed`.
-3. **Coda piena**: massimo **10** job `queued` per l'intero sistema (configurabile). Oltre → `409` con `code: queue_full`.
-4. **Cancel**: solo job ancora `queued` → `cancelled`; job `running` non interrompibile in v1 (documentato in API).
-5. **Riavvio processo**:
-   - Job `running` → `failed`, `error_code: interrupted`, `error_detail` in italiano.
-   - Job `queued` restano in coda; l'executor li riprende.
-
-Non si usa policy «reject-if-busy»: la coda FIFO evita perdita richieste e resta semplice con SQLite.
-
-```
-  [queued pos=1] → [running] → [done|failed]
-        ↑
-  [queued pos=2..N]  (max N=10)
-```
-
-## Engine TTS e assert XPU
-
-All'avvio del modulo engine (prima di accettare job):
-
-```python
-import torch
-
-# Caricamento Qwen3-TTS 0.6B Base su device XPU
-# ... load model ...
-
-assert torch.xpu.is_available(), "XPU non disponibile"
-assert torch.xpu.memory_allocated() > 0, (
-    "Il modello non è stato caricato su XPU; "
-    "il processo termina per evitare sintesi su CPU non supportata."
-)
-```
-
-**Fail-closed**: se l'assert fallisce, il processo non parte (exit code ≠ 0). Nessun fallback su CPU in v1.
-
-Warm-up opzionale: una inferenza breve in startup per validare il pipeline completo.
-
-## Audio: formato, path, streaming
-
-| Aspetto | Decisione |
-|---------|-----------|
-| Formato output | **WAV** PCM 16-bit, mono, 24 kHz (allineato a Qwen3-TTS; aggiornare se il modello impone altro sample rate) |
-| Content-Type | `audio/wav` |
-| Path | `data/users/<user_id>/jobs/<job_id>/output.wav` |
-| Download | `GET /api/v1/jobs/{job_id}/audio` — auth obbligatoria |
-| Streaming / seek | Supporto header **`Range`** (`206 Partial Content`) per player HTML5 |
-| URL pubblici | **Non** in v1: nessun link non autenticato; no signed URL fino a requisito esplicito |
-
-L'audio di riferimento voce accetta `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/x-m4a`; max **20 MB**, durata consigliata 5–30 secondi (validazione lato server).
-
-## Internazionalizzazione
-
-- **UI v1**: solo italiano (`it-IT`). Nessun selettore lingua.
-- **API errori**: campo `detail` in italiano + `code` stabile in `snake_case` per client programmatici.
-- **OpenAPI**: descrizioni in italiano dove utile; enum e field names in inglese/snake_case per stabilità cross-platform.
-
-## Fuori scope (v1)
-
-- App native Android/iOS (possono riusare `/api/v1/*` in futuro).
-- Multi-tenant / organizzazioni.
-- Più GPU o job paralleli.
-- URL firmati o CDN per audio.
-- OAuth / SSO.
-- Localizzazione UI non italiana.
-
-## Dipendenze previste (riferimento)
-
-- **Backend**: FastAPI, uvicorn, SQLAlchemy o sqlite3, passlib/argon2, python-multipart, torch con supporto XPU, Qwen3-TTS.
-- **Frontend**: Vite, React, TypeScript; testi hardcoded o file `it.json` unico.
-- **DB**: SQLite file `data/tts.db`, WAL mode consigliato.
+- Route pubbliche: `GET /health`, `POST /auth/login`.
+- Register protetto da `X-API-Key`.
+- Isolamento dati per `user_id`: cross-user access → `404`.
+- Upload: whitelist estensioni/MIME, max `MAX_UPLOAD_BYTES`, path traversal bloccato.
+- `/health` non espone secrets, path o env.
 
 ## Riferimenti
 
 - Contratto HTTP dettagliato: [`docs/API.md`](API.md)
-- OpenAPI machine-readable: [`openapi.yaml`](../openapi.yaml) (root repository)
+- OpenAPI: [`openapi.yaml`](../openapi.yaml) (root repo)
+- Implementazione schemi: `tts_server/schemas.py` (PR #10)

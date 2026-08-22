@@ -223,11 +223,7 @@ code {
 .chip--queued { background: rgba(107, 114, 128, 0.2); color: var(--color-queued); }
 .chip--running,
 .chip--processing { background: rgba(91, 141, 239, 0.2); color: var(--color-running); }
-.chip--done,
-.chip--completed,
-.chip--ready { background: rgba(76, 175, 130, 0.2); color: var(--color-done); }
-.chip--failed { background: rgba(224, 92, 92, 0.2); color: var(--color-failed); }
-.chip--cancelled { background: rgba(107, 114, 128, 0.2); color: var(--color-queued); }
+.chip--completed { background: rgba(76, 175, 130, 0.2); color: var(--color-done); }
 
 .queue-hint {
   color: var(--color-text-muted);

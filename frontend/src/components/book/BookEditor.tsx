@@ -129,7 +129,7 @@ export function BookEditor({
       })
       onJobCreated(job.id)
     } catch (err: unknown) {
-      if (err instanceof HttpError && err.code === 'queue_full') {
+      if (err instanceof HttpError && err.status === 409) {
         onQueueFull(err.message)
         setError(err.message)
       } else {

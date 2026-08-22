@@ -7,3 +7,9 @@ export {
   useActiveJobsPolling,
 } from './hooks/useJobPolling'
 export type { AudioWaveformContext } from './components/AudioPlayer'
+export {
+  isTerminalJobStatus,
+  isActiveJobStatus,
+  canPlayJobAudio,
+} from './api/jobs'
+export { jobDownloadPath } from './api/client'
