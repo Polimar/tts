@@ -10,13 +10,13 @@ Documento di design per dialoghi multi-personaggio. Non copre i libri (job singl
 | Concetto | Ruolo |
 |----------|-------|
 | **Character** | Configurazione persistente del parlante: voce clonata, nome, colore chip, velocità/pitch di default, avatar opzionale. Non è un asset audio. |
-| **Turn** | Una battuta ordinata: testo + riferimento a un character + override opzionali (gap, speed, volume). Ogni turn diventa un chunk TTS separato. |
+| **Turn** | Una battuta ordinata: testo + riferimento a un character + override opzionale `gapMs`. Ogni turn diventa un chunk TTS separato. |
 
 ## Character
 
 - `voiceId` (obbligatorio): deve puntare a una voce clonata dall'utente in stato **ready**.
 - Se la voce manca al momento della generazione → turn/job in stato **blocked**. Nessun fallback silenzioso.
-- `avatarId` è solo visivo. Default UI: `avatar-neutro`, `avatar-uomo`, `avatar-donna`, `avatar-bambino`, `avatar-anziano`, `avatar-custom`. Avatar campione `avatar-01`–`avatar-04` opzionali. Avatar assente → iniziali su cerchio teal.
+- `avatar` (opzionale) è solo visivo. Default UI: `avatar-neutro`, `avatar-uomo`, `avatar-donna`, `avatar-bambino`, `avatar-anziano`, `avatar-custom`. Avatar campione `avatar-01`–`avatar-04` opzionali. Avatar assente → iniziali su cerchio teal.
 - Default impliciti: `speed` 1.0, `pitch` 1.0.
 
 ## Dialogue
@@ -41,4 +41,3 @@ Documento di design per dialoghi multi-personaggio. Non copre i libri (job singl
 | Turn per dialogue | 40 |
 | Caratteri per turn (`text`) | 4000 |
 | Override `gapMs` | 0–1500 ms |
-| Override `volume` | 0–1 |

@@ -5,20 +5,20 @@
     {
       "id": "barista",
       "voiceId": "voice-clone-marco-7f3a",
-      "displayName": "Marco",
+      "name": "Marco",
       "color": "#0D9488",
       "speed": 1.0,
       "pitch": 1.0,
-      "avatarId": "avatar-uomo"
+      "avatar": "avatar-uomo"
     },
     {
       "id": "cliente",
       "voiceId": "voice-clone-giulia-2b91",
-      "displayName": "Giulia",
+      "name": "Giulia",
       "color": "#7C3AED",
       "speed": 1.05,
       "pitch": 1.0,
-      "avatarId": "avatar-donna"
+      "avatar": "avatar-donna"
     }
   ],
   "defaultGapMs": 350,
@@ -37,14 +37,12 @@
     {
       "id": "t3",
       "characterId": "cliente",
-      "text": "No grazie, così va benissimo.",
-      "volume": 0.9
+      "text": "No grazie, così va benissimo."
     },
     {
       "id": "t4",
       "characterId": "barista",
       "text": "Ecco a lei. Buona giornata!",
-      "speed": 0.95,
       "gapMs": 0
     }
   ]

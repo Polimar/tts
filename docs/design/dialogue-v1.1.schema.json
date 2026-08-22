@@ -56,7 +56,7 @@
           "minLength": 1,
           "description": "Reference to a user-cloned voice that is ready for generation. If the voice is missing at generate time, the turn/job status is blocked. No silent fallback."
         },
-        "displayName": {
+        "name": {
           "type": "string",
           "description": "Label shown in the UI."
         },
@@ -77,7 +77,7 @@
           "default": 1.0,
           "description": "Default pitch multiplier for this character."
         },
-        "avatarId": {
+        "avatar": {
           "type": "string",
           "description": "Visual-only avatar reference. UI defaults: avatar-neutro, avatar-uomo, avatar-donna, avatar-bambino, avatar-anziano, avatar-custom. Sample extras avatar-01 through avatar-04 may exist but are not required. Missing avatar renders initials on a teal circle."
         }
@@ -109,17 +109,6 @@
           "minimum": 0,
           "maximum": 1500,
           "description": "Optional override: silence in milliseconds after this turn before the next. Last turn: ignored or 0."
-        },
-        "speed": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "description": "Optional per-turn speed override (inherits character speed when omitted)."
-        },
-        "volume": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Optional per-turn volume override (0–1)."
         }
       }
     }
