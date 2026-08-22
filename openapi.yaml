@@ -1,0 +1,717 @@
+openapi: 3.0.3
+info:
+  title: TTS Service
+  description: >
+    Local Qwen3-TTS voice cloning API (live backend, tts_server).
+    SUPERSEDED: PR #3 draft used /api/v1, cookie tts_session, and email.
+    This spec matches PR #10 — no /api prefix, Bearer token, field username.
+    Base URL http://host:8765. Same-origin UI on :8765 in production.
+  version: 0.1.0
+
+servers:
+  - url: http://0.0.0.0:8765
+    description: Default bind (HOST=0.0.0.0, PORT=8765)
+
+tags:
+  - name: system
+    description: Liveness and worker info
+  - name: auth
+    description: Registration, login, Bearer sessions
+  - name: voices
+    description: Voice reference uploads
+  - name: jobs
+    description: TTS synthesis queue and downloads
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Public health check
+      operationId: health
+      responses:
+        "200":
+          description: Service liveness
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthOut"
+              example:
+                status: ok
+                worker_ready: true
+
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register user (requires X-API-Key)
+      operationId: register
+      parameters:
+        - $ref: "#/components/parameters/XApiKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            example:
+              username: mario
+              password: password123
+      responses:
+        "201":
+          description: User created and session token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Username already exists
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login with username and password
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              username: mario
+              password: password123
+      responses:
+        "200":
+          description: Session token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Invalid credentials
+        "429":
+          description: Too many login attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Too many login attempts; try again later
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Invalidate current Bearer token
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Token invalidated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Current user profile
+      operationId: me
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserOut"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+
+  /voices:
+    get:
+      tags: [voices]
+      summary: List voices for current user
+      operationId: listVoices
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Voice list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VoiceOut"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [voices]
+      summary: Create voice from reference audio
+      operationId: createVoice
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - name
+                - ref_text
+                - audio
+              properties:
+                name:
+                  type: string
+                  description: Display name
+                ref_text:
+                  type: string
+                  description: Spoken text in the reference audio
+                language:
+                  type: string
+                  default: Italian
+                audio:
+                  type: string
+                  format: binary
+                  description: Reference audio file (not reference_audio)
+      responses:
+        "201":
+          description: Voice created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceOut"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: Upload too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Upload too large
+
+  /voices/{voice_id}:
+    parameters:
+      - $ref: "#/components/parameters/VoiceId"
+    get:
+      tags: [voices]
+      summary: Get voice by id
+      operationId: getVoice
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Voice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceOut"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [voices]
+      summary: Delete voice
+      operationId: deleteVoice
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Voice deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /jobs:
+    get:
+      tags: [jobs]
+      summary: List jobs for current user
+      operationId: listJobs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobOut"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [jobs]
+      summary: Queue TTS synthesis job
+      operationId: createJob
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobCreateRequest"
+            example:
+              voice_id: voice-id
+              text: Testo da sintetizzare.
+              language: Italian
+      responses:
+        "201":
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobOut"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Voice not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Voice not found
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /jobs/{job_id}:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [jobs]
+      summary: Get job status (poll until completed or failed)
+      operationId: getJob
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Job state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobOut"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /jobs/{job_id}/download/wav:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [jobs]
+      summary: Download completed job as WAV
+      operationId: downloadJobWav
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: WAV audio file
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Job or WAV not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+        "409":
+          description: Job not completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Job not completed
+
+  /jobs/{job_id}/download/mp3:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      tags: [jobs]
+      summary: Download completed job as MP3
+      operationId: downloadJobMp3
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: MP3 audio file
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Job or MP3 not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+        "409":
+          description: Job not completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Job not completed
+
+  /system/device:
+    get:
+      tags: [system]
+      summary: Worker device and warmup info
+      operationId: deviceInfo
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Device info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceInfoOut"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Worker not initialized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: Worker not initialized
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token from AuthResponse.token (not a cookie)
+
+  parameters:
+    XApiKey:
+      name: X-API-Key
+      in: header
+      required: true
+      description: Static API key (server env API_KEY) required for registration
+      schema:
+        type: string
+    VoiceId:
+      name: voice_id
+      in: path
+      required: true
+      schema:
+        type: string
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Unauthorized:
+      description: Not authenticated or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          examples:
+            notAuthenticated:
+              value:
+                detail: Not authenticated
+            invalidToken:
+              value:
+                detail: Invalid or expired token
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+    ValidationError:
+      description: Pydantic validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorDetail"
+
+  schemas:
+  # Mirrors tts_server/schemas.py — field names must match byte-for-byte
+
+    UserOut:
+      type: object
+      required:
+        - id
+        - username
+        - created_at
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        created_at:
+          type: string
+          description: ISO 8601 timestamp
+
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required:
+        - token
+        - expires_at
+        - user
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          description: ISO 8601 timestamp
+        user:
+          $ref: "#/components/schemas/UserOut"
+
+    VoiceOut:
+      type: object
+      required:
+        - id
+        - name
+        - ref_text
+        - language
+        - created_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        ref_text:
+          type: string
+        language:
+          type: string
+        created_at:
+          type: string
+
+    JobCreateRequest:
+      type: object
+      required:
+        - voice_id
+        - text
+      properties:
+        voice_id:
+          type: string
+        text:
+          type: string
+          minLength: 1
+        language:
+          type: string
+          default: Italian
+
+    JobStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - completed
+        - failed
+
+    JobOut:
+      type: object
+      required:
+        - id
+        - voice_id
+        - status
+        - language
+        - text
+        - chunk_count
+        - wav_available
+        - mp3_available
+        - created_at
+      properties:
+        id:
+          type: string
+        voice_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        language:
+          type: string
+        text:
+          type: string
+        chunk_count:
+          type: integer
+        error:
+          type: string
+          nullable: true
+        wav_available:
+          type: boolean
+        mp3_available:
+          type: boolean
+        device_used:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        started_at:
+          type: string
+          nullable: true
+        completed_at:
+          type: string
+          nullable: true
+
+    HealthOut:
+      type: object
+      required:
+        - status
+        - worker_ready
+      properties:
+        status:
+          type: string
+        worker_ready:
+          type: boolean
+
+    DeviceInfoOut:
+      type: object
+      required:
+        - device
+        - model_id
+        - xpu_gate_passed
+        - xpu_gate_reason
+        - xpu_memory_bytes
+        - cpu_warmup_seconds
+      properties:
+        device:
+          type: string
+          example: cpu
+        model_id:
+          type: string
+        xpu_gate_passed:
+          type: boolean
+        xpu_gate_reason:
+          type: string
+        xpu_memory_bytes:
+          type: integer
+          format: int64
+        cpu_warmup_seconds:
+          type: number
+          format: float
+        xpu_warmup_seconds:
+          type: number
+          format: float
+          nullable: true
+
+    ErrorDetail:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+
+    ValidationErrorDetail:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              loc:
+                type: array
+                items:
+                  oneOf:
+                    - type: string
+                    - type: integer
+              msg:
+                type: string
+              input:
+                nullable: true
