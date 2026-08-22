@@ -275,9 +275,31 @@ Ogni riga = turno:
 - Un file WAV/MP3 (stitch)
 - ZIP clip isolate per turno
 
+### Avatar / busti personaggio (v1.1)
+
+Avatar opzionale per personaggio nel character manager e nell'editor turni. Il **colore UI** del personaggio resta lo **swatch** (barra riga, chip); non va dipinto sul busto.
+
+| Token | Valore |
+|-------|--------|
+| Frame sorgente | 512×512 px, PNG + WebP |
+| Display | 40 / 64 / 96 px (lista compatta / card / dettaglio) |
+| Inquadratura | Testa + spalle, volto ~60% altezza frame, frontale |
+| Maschera | Crop circolare safe (UI applica `border-radius: 50%`) |
+| Sfondo asset | Trasparente — niente disco, ombra o glow baked |
+| Stile | Illustrazione flat, 2–3 valori tonali, tratto 2 px @512, **no** outline nero, **no** fotoreal/PBR |
+| Espressione | Neutra, bocca chiusa |
+| Set predefinito (6) | **Neutro** · **Uomo** · **Donna** · **Bambino** · **Anziano** · **Custom** |
+| Variante Custom | Silhouette + plus / volto geometrico, stesso peso visivo del set |
+| Colore accent | Evitare riempimenti ampi di `#C45C26` sul busto |
+| Placeholder | Stesso crop/cerchio, fill `#D9D3C8` (nessun asset) |
+
+Selezione avatar: picker griglia nel character manager; default **Neutro** alla creazione personaggio.
+
 ---
 
 ## Gerarchia visiva e stati
+
+**Token colore (lock Frontend + 2D):** bg `#F7F4EF` · ink `#1C1916` · muted `#8A8378` · surface `#FFFDF9` · accent `#C45C26`
 
 | Principio | Implementazione |
 |-----------|-----------------|
@@ -350,3 +372,4 @@ Target primario: **workstation locale Windows** (Arc GPU).
 | Data | Versione | Note |
 |------|----------|------|
 | 2026-08-22 | 1.0 | Prima stesura; repo senza UI esistente |
+| 2026-08-22 | 1.1 | Avatar/busti personaggio v1.1 + token colore lock |
