@@ -1,6 +1,6 @@
 # tts
 
-Webapp open source per clone vocale italiano (upload audio + testo). Target locale: **Windows** con Intel Arc (XPU, quando disponibile); produzione via **Nginx Proxy Manager** su `tts.alevale.it`.
+Webapp open source per clone vocale italiano (upload audio + testo). Target locale: **Windows su CPU**; produzione via **Nginx Proxy Manager** su `tts.alevale.it`.
 
 ## Stack (piano attuale)
 
@@ -8,9 +8,9 @@ Webapp open source per clone vocale italiano (upload audio + testo). Target loca
 |---|---|
 | Modello | **Qwen3-TTS-12Hz-0.6B-Base** (`Qwen/Qwen3-TTS-12Hz-0.6B-Base`) |
 | API | FastAPI + autenticazione per utente |
-| Worker | Processo Qwen3-TTS con **coda GPU seriale** (un job alla volta) |
+| Worker | Processo Qwen3-TTS con **coda inference seriale** (un job alla volta) |
 | Export | WAV / MP3, chunking per libri |
-| Target OS locale | Windows (CPU o XPU; validazione GPU separata) |
+| Target OS locale | Windows (**CPU** — percorso supportato) |
 
 **Non** è il percorso primario: XTTS, Coqui TTS, TTS-OV. Documentazione legacy su quei stack è obsoleta.
 
@@ -23,7 +23,7 @@ Il backend implementa l’app FastAPI, il worker e la logica di business. Questo
 - Windows 10/11 (64-bit)
 - Python **3.10+** (3.11 consigliato)
 - Git
-- (Opzionale, futuro) Intel Arc + driver + `torch` con supporto XPU — **non garantito** in questa fase; default **CPU**
+- Inference su **CPU** (`TTS_DEVICE=cpu`); Intel Arc / XPU **non** è il percorso locale supportato (vedi sotto)
 
 ---
 
@@ -131,15 +131,30 @@ Il worker scarica `Qwen/Qwen3-TTS-12Hz-0.6B-Base` (~2,5 GB). Cache tipica:
 
 Primo avvio: download lungo; pianificare spazio disco (~5 GB tra modello e cache).
 
-### Device / GPU
+### Device inference (`TTS_DEVICE`)
 
-| `TTS_DEVICE` | Significato |
+Default: **`cpu`**. Il worker locale su Windows deve usare CPU finché non esiste un percorso XPU validato end-to-end.
+
+| `TTS_DEVICE` | Stato |
 |---|---|
-| `cpu` | Default sicuro su Windows |
-| `xpu` | Intel Arc / XPU — **sperimentale**, richiede stack torch+XPU validato separatamente |
+| `cpu` | **Supportato** — default e percorso locale previsto |
+| `xpu` | **NO-GO** su hardware testato — non usare in produzione locale |
 | `cuda` | Non target per questo deploy Windows-first |
 
-La coda GPU è **seriale**: un solo job inference alla volta; non avviare più worker sullo stesso GPU.
+#### XPU: esito ricerca (fail-closed)
+
+Su **Windows Ultra 9 285H + Intel Arc 140T** il Researcher ha registrato **NO-GO**:
+
+- `torch 2.13.0+xpu`, `xpu.is_available()` → `True`
+- `model.model.to("xpu")` carica ~1,8 GB su `xpu:0`
+- `generate_voice_clone` **crash**: gli input ids restano su CPU mentre i pesi sono su `xpu:0`
+- Nessun timing post-warmup utile (la generazione non completa)
+
+**Decisione team:** il worker usa **CPU** di default. XPU è ammesso solo se un warmup di generazione completa riesce **e** batte CPU su latenza; altrimenti **fail-closed** (non avviare su XPU). Spostare solo i pesi con `.to("xpu")` **non basta** — serve allineamento device su tutto il forward.
+
+Non documentare Intel Arc / XPU come percorso locale supportato finché questi criteri non sono soddisfatti.
+
+La coda inference è **seriale**: un solo job alla volta sul device attivo; non avviare più worker concorrenti sullo stesso accelerator.
 
 ---
 
@@ -165,7 +180,7 @@ Non esporre `8765` su Internet se NPM è il punto di ingresso: solo NPM deve rag
 
 ## Docker Compose
 
-**Non usato** per il percorso primario: singolo processo Python su Windows con GPU/XPU.
+**Non usato** per il percorso primario: singolo processo Python su Windows (CPU).
 
 Se in futuro servono Redis o DB opzionali, aggiungere un `docker-compose.yml` separato; non è richiesto per il worker Qwen3-TTS locale.
 
