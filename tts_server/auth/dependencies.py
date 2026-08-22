@@ -36,6 +36,8 @@ def get_current_user_id(
 
 
 def verify_api_key(x_api_key: Optional[str] = None) -> None:
+    if settings.allow_public_registration:
+        return
     if not x_api_key or x_api_key != settings.api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

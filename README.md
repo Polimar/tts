@@ -203,7 +203,30 @@ Il backend FastAPI importa `settings` invece di hardcodare host/porta/path.
 - Copia `.env.example` → `.env`; **non** committare `.env` o secrets reali.
 - Rotazione periodica di `JWT_SECRET` / `API_KEY` se usati.
 - `DATA_DIR` e output audio sono dati sensibili: backup e permessi OS appropriati.
-- Route pubbliche: solo `GET /health` e `POST /auth/login`. Register richiede header `X-API-Key`.
+- Route pubbliche: solo `GET /health` e `POST /auth/login`. Register richiede header `X-API-Key` oppure `ALLOW_PUBLIC_REGISTRATION=1`.
+
+---
+
+## Frontend (UI italiana)
+
+Build e servizio same-origin su `GET /` (stessa porta dell'API):
+
+```bash
+cd frontend && npm install && npm run build
+MOCK_WORKER=1 uvicorn tts_server.main:app --host 0.0.0.0 --port 8765
+```
+
+Apri `http://localhost:8765/` — login, voci, coda job, download WAV/MP3.
+
+Sviluppo con hot-reload (proxy API verso `:8765`):
+
+```bash
+# terminale 1
+MOCK_WORKER=1 uvicorn tts_server.main:app --host 0.0.0.0 --port 8765
+
+# terminale 2
+cd frontend && npm run dev
+```
 
 ---
 

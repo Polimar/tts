@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from tts_server.api import api_router
 from tts_server.config import settings
+from tts_server.static import frontend_available, router as static_router
 from tts_server.worker.qwen3_worker import get_job_queue, get_worker
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(api_router)
+    if frontend_available():
+        app.include_router(static_router)
     return app
 
 
