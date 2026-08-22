@@ -238,7 +238,7 @@ Formato default pre-selezionato da Impostazioni utente.
 | Export | Formato default: **WAV** (PCM 16-bit · 24 kHz · mono) o **MP3** (192 kbps CBR) — label come in Player |
 | Lingua | IT only (v1, nessun selettore) |
 
-**Nota (Game Designer lock):** il gap dialoghi **350 ms** è costante di prodotto — **non** compare in Impostazioni (né v1 né v1.1). Modificabile solo per-turno nell'editor (0–1500 ms).
+**Nota (Game Designer lock):** il gap dialoghi **350 ms** è costante di prodotto — **non** compare in Impostazioni. Un solo override per turn nell'editor: `gapMs` 0–1500 (ultimo turn: omit).
 
 ---
 
@@ -254,9 +254,9 @@ Formato default pre-selezionato da Impostazioni utente.
 | Entità | Chiavi lock |
 |--------|-------------|
 | **Character** | `id`, `voiceId`, `name`, `color`, `speed`, `pitch`, `avatar?` |
-| **Turn** | `id`, `characterId`, `text`, `gapMs?` (omit = `defaultGapMs` **350**) |
+| **Turn** | `id`, `characterId`, `text`, `gapMs?` (omit = `defaultGapMs` **350**; **ultimo turn:** omit — nessun gap finale) |
 | **Dialogue** | `characters` **1–8**, `turns` **1–40**, `defaultGapMs` **350**, `text` ≤ **4000** char/turn |
-| **Job dialogo** | N job TTS (1 turn = 1 chunk) → concat WAV; gap stitch da `gapMs` o `defaultGapMs` |
+| **Job dialogo** | N job TTS (1 turn = 1 chunk) → concat WAV; gap stitch da `gapMs` o `defaultGapMs` (non dopo l'ultimo turn) |
 
 ### Regole invarianti
 
@@ -265,7 +265,8 @@ Formato default pre-selezionato da Impostazioni utente.
 - Dialoghi senza voci pronte → empty state con CTA **Vai alle voci** (`/voci`), non generazione
 - Libri restano job **mono-voce**; i dialoghi sono **multi-voce**
 - Cap: **8** personaggi, **40** turni, **4000** caratteri/turno (hard block UI)
-- Gap **350 ms**: costante di prodotto (Game Designer); **solo** override per-turno 0–1500 ms nell'editor — mai in Impostazioni
+- Gap **350 ms**: costante di prodotto; **un solo campo UI per turn:** `gapMs` **0–1500** (omit = 350) — **nessun** controllo pre/post pause
+- **Ultimo turn:** nessun gap finale — nascondere o disabilitare il controllo `gapMs` sull'ultima riga; in serializzazione **omettere** `gapMs` (preferito) o inviare `0` — engine ignora
 
 ### Empty state (2D lock)
 
@@ -283,8 +284,15 @@ Illustrazione due balloon + CTA **Vai alle voci** → `/voci`. Badge **v1.1** so
 Ogni riga = turno:
 
 ```
-[barra colore speaker] | Select personaggio | Textarea | Gap (ms) | ⋮ azioni
+[barra colore speaker] | Select personaggio | Textarea | gapMs (ms) | ⋮ azioni
 ```
+
+**Solo `gapMs` per turn** (0–1500 ms; placeholder/default 350 se omesso). **Nessun** campo pre/post pause in UI.
+
+| Regola `gapMs` | Comportamento |
+|----------------|---------------|
+| Turni 1 … N−1 | Input `gapMs` editabile (0–1500); omit in save → 350 |
+| **Ultimo turn (riga N)** | Controllo **nascosto o disabilitato** — non inviare `gapMs` (preferito) oppure `0`; nessun gap trailing nello stitch |
 
 | Funzione | Comportamento |
 |----------|---------------|
@@ -526,7 +534,7 @@ Chiavi camelCase per i18n Frontend. **Non aggiungere stringhe** oltre questo set
 | ID turno | `id` | Univoco in `turns[]` |
 | Speaker | `characterId` | Ref a `characters[].id` |
 | Testo | `text` | **1–4000** char (hard block UI) |
-| Gap dopo turno | `gapMs` | Opzionale **0–1500**; se omesso → `defaultGapMs` (**350**) |
+| Gap dopo turno | `gapMs` | Opzionale **0–1500**; se omesso → `defaultGapMs` (**350**). **Ultimo turn in `turns[]`:** omettere `gapMs` (preferito) o `0` — nessun gap trailing |
 
 **Dialogue**
 
@@ -547,7 +555,7 @@ Chiavi camelCase per i18n Frontend. **Non aggiungere stringhe** oltre questo set
 - [ ] Tabella coda: 5 stati, 3 tipi, progress Frase N/M su libri
 - [ ] Stato `bloccato`: badge ambra, `errVoiceMissingJob`, CTA Vai alle voci, no audio placeholder
 - [ ] Caps dialogo: 8 / 40 / 4000 enforced in UI
-- [ ] Form dialogo: bind schema `docs/design/` (`id`, `characters`, `turns`, `defaultGapMs`, campi Character/Turn)
+- [ ] Form dialogo: bind schema `docs/design/`; solo `gapMs` per turn (no pre/post pause); ultima riga senza gap
 - [ ] Player export labels WAV/MP3; ZIP solo `dialogo`
 - [ ] Login errori inline + toast rete
 
@@ -566,3 +574,4 @@ Chiavi camelCase per i18n Frontend. **Non aggiungere stringhe** oltre questo set
 | 2026-08-22 | 1.6 | Sprint 2: checklist implementazione Frontend + binding JSON camelCase |
 | 2026-08-22 | 1.7 | Copy keys lock IT upload/voce; JSON `name`/`avatar`; CTA Vai alle voci |
 | 2026-08-22 | 1.8 | JSON binding allineato a `docs/design/` (PR #11): `id`, `gapMs?` |
+| 2026-08-22 | 1.9 | Dialoghi: solo `gapMs` per turn; ultimo turn senza gap trailing |
