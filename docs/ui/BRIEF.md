@@ -416,6 +416,116 @@ Target primario: **workstation locale Windows** (Arc GPU).
 
 ---
 
+## Checklist implementazione (Sprint 2)
+
+Checklist ticketabile per Frontend. **Nessun codice React in questo doc.** Tutti i lock precedenti (teal, empty states, Sound, gap 350 ms, avatar path) restano validi.
+
+**Game Designer (JSON):** chiavi **camelCase in inglese**. Schema personaggi/dialoghi in arrivo nel repo; i **libri non sono** in quel JSON (restano job mono-voce testo/libro via API job).
+
+### Empty states
+
+| Route | Condizione | UI | CTA |
+|-------|------------|-----|-----|
+| `/voci` | 0 voci | Illustrazione mic (2D) | **Carica audio** |
+| `/coda` | 0 job | Illustrazione lista vuota (2D) | **Nuovo job** → `/nuovo` |
+| `/dialoghi` | 0 personaggi / nessuna voce pronta | Due balloon (2D) | **Vai alle voci** → `/voci` |
+| Avatar assente | Personaggio senza `avatar` o file mancante | Iniziali su cerchio teal `#0F766E` | — (mai volto vuoto) |
+
+Badge **v1.1** su Dialoghi: **solo in nav**, non sull'empty state.
+
+### Errori (copy IT — inline; toast dove indicato)
+
+| Contesto | Trigger | UI | Copy (o placeholder) |
+|----------|---------|-----|----------------------|
+| Login | Email non valida | Inline campo email | «Email non valida» |
+| Login | Password vuota / errata | Inline campo password | «Password non valida» / «Credenziali errate» |
+| Login | Errore rete | Toast | «Errore di connessione. Riprova.» |
+| Upload voce | Formato non WAV/FLAC/MP3/M4A | Inline dropzone | `[SOUND]` stringa finale |
+| Upload voce | Durata &lt; 8 s o &gt; 90 s | Inline dropzone | `[SOUND]` stringa finale |
+| Upload voce | Errore server post-upload | Inline card + toast | Messaggio API o `[SOUND]` |
+| Genera (testo/libro) | Nessuna voce selezionata | Primary **disabilitato** + hint | «Seleziona una voce» + link `/voci` |
+| Coda job | Stato `errore` | Riga + dettaglio | Messaggio API (non inventare) |
+| Dialogo | Voce/personaggio mancante | Stato **`bloccato`**, badge ambra | «Voce mancante: {nome}» + CTA **Apri voce** → `/voci` o personaggio |
+| Dialogo | Cap personaggi | Hard block UI | «Massimo 8 personaggi» |
+| Dialogo | Cap turni | Hard block UI | «Massimo 40 turni» |
+| Dialogo | Cap caratteri/turno | Hard block input | «Massimo 4000 caratteri per turno» |
+
+**Invariante:** voce mancante → **mai** audio silenzioso o placeholder audio in coda/player.
+
+### Coda — colonne e stati
+
+**Colonne tabella:** stato · tipo · voce/i · creato · durata stimata · azioni
+
+| Stato (`status`) | Label UI | Note |
+|------------------|----------|------|
+| `inCoda` | In coda | — |
+| `inElaborazione` | In elaborazione | Progress determinato se API espone % |
+| `completato` | Completato | — |
+| `errore` | Errore | Mostra messaggio API |
+| `bloccato` | Bloccato | Badge ambra; dialoghi / voce mancante |
+
+| Tipo (`type`) | Label UI |
+|---------------|----------|
+| `testo` | Testo |
+| `libro` | Libro |
+| `dialogo` | Dialogo |
+
+**Job libro in elaborazione:** progress UI «**Frase N / M**» (o stima backend); titolo capitolo solo se presente nel sorgente.
+
+**Download per tipo:** testo/libro → solo WAV/MP3 file completo (**no ZIP**); dialogo → stitch WAV/MP3 + ZIP clip dry.
+
+### Binding JSON (campo UI → chiave)
+
+Schema file in arrivo nel repo; binding minimo per Sprint 2:
+
+**Personaggio (`Character`)**
+
+| Campo UI | Chiave JSON | Note |
+|----------|-------------|------|
+| Voce collegata | `voiceId` | Obbligatorio; voce utente in stato pronta |
+| Nome display | `name` | — |
+| Colore swatch / barra riga | `color` | Hex o token — non sul busto |
+| Velocità default | `speed` | — |
+| Pitch default | `pitch` | — |
+| Avatar (opzionale) | `avatar` | Filename es. `avatar-neutro` → risolve in `docs/ui/avatars/` |
+
+**Dialogo (`Dialogue`)**
+
+| Campo UI | Chiave JSON | Note |
+|----------|-------------|------|
+| Lista personaggi | `characters` | Array **1–8** |
+| Lista turni | `turns` | Array **1–40** |
+| Gap stitch default | `defaultGapMs` | **350** — costante prodotto, **non** in Impostazioni |
+
+**Turno (`Turn`)**
+
+| Campo UI | Chiave JSON | Vincoli |
+|----------|-------------|---------|
+| Speaker | `characterId` | Ref a `characters[].id` |
+| Testo | `text` | Max **4000** char (hard block) |
+| Gap dopo turno | `gapMs` | **0–1500**; default eredita `defaultGapMs` |
+| Velocità override | `speed` | Opzionale (se in GDD) |
+| Volume override | `volume` | Opzionale (se in GDD) |
+| Pausa pre | `prePauseMs` | Opzionale (se in GDD) |
+| Pausa post | `postPauseMs` | Opzionale (se in GDD) |
+
+**Libri:** fuori da questo JSON — job `type: libro` via API coda; un job, una voce, testo sorgente file/incolla.
+
+### Ticket suggeriti (Sprint 2)
+
+- [ ] Empty states `/voci`, `/coda`, `/dialoghi` con CTA lock
+- [ ] Avatar fallback iniziali teal; asset da `docs/ui/avatars/*.png|webp`
+- [ ] Upload: accept + validazione durata client; placeholder `[SOUND]` su errori audio
+- [ ] Genera disabilitato senza voce; hint + link Voci
+- [ ] Tabella coda: 5 stati, 3 tipi, progress Frase N/M su libri
+- [ ] Stato `bloccato`: badge ambra, CTA voce, no audio placeholder
+- [ ] Caps dialogo: 8 / 40 / 4000 enforced in UI
+- [ ] Form dialogo: bind `characters`, `turns`, `defaultGapMs`, campi turno
+- [ ] Player export labels WAV/MP3; ZIP solo `dialogo`
+- [ ] Login errori inline + toast rete
+
+---
+
 ## Changelog brief
 
 | Data | Versione | Note |
@@ -426,3 +536,4 @@ Target primario: **workstation locale Windows** (Arc GPU).
 | 2026-08-22 | 1.3 | Sound Designer lock: upload clone, export labels, progress libro, loudness engine-only |
 | 2026-08-22 | 1.4 | Avatar filenames lock in `docs/ui/avatars/` (asset 3D, no redraw) |
 | 2026-08-22 | 1.5 | 2D lock: margine 8% busto, display 32/40 liste, iniziali su teal se mancante |
+| 2026-08-22 | 1.6 | Sprint 2: checklist implementazione Frontend + binding JSON camelCase |
