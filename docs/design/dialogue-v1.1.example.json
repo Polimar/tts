@@ -1,0 +1,51 @@
+{
+  "id": "dlg-esempio-caffetteria",
+  "title": "Al bar — mattina",
+  "characters": [
+    {
+      "id": "barista",
+      "voiceId": "voice-clone-marco-7f3a",
+      "displayName": "Marco",
+      "color": "#0D9488",
+      "speed": 1.0,
+      "pitch": 1.0,
+      "avatarId": "avatar-uomo"
+    },
+    {
+      "id": "cliente",
+      "voiceId": "voice-clone-giulia-2b91",
+      "displayName": "Giulia",
+      "color": "#7C3AED",
+      "speed": 1.05,
+      "pitch": 1.0,
+      "avatarId": "avatar-donna"
+    }
+  ],
+  "defaultGapMs": 350,
+  "turns": [
+    {
+      "id": "t1",
+      "characterId": "cliente",
+      "text": "Buongiorno! Un cappuccino e un cornetto, per favore."
+    },
+    {
+      "id": "t2",
+      "characterId": "barista",
+      "text": "Buongiorno! Cappuccino e cornetto. Vuole zucchero?",
+      "gapMs": 500
+    },
+    {
+      "id": "t3",
+      "characterId": "cliente",
+      "text": "No grazie, così va benissimo.",
+      "volume": 0.9
+    },
+    {
+      "id": "t4",
+      "characterId": "barista",
+      "text": "Ecco a lei. Buona giornata!",
+      "speed": 0.95,
+      "gapMs": 0
+    }
+  ]
+}
