@@ -178,6 +178,91 @@ Non esporre `8765` su Internet se NPM è il punto di ingresso: solo NPM deve rag
 
 ---
 
+## Ops box live (`C:\Users\Valerio\tts`)
+
+Runbook copy-paste per il PC Windows di produzione. Un solo processo **uvicorn** su `0.0.0.0:8765` — **nessun** docker-compose, **nessun** server statico separato: il frontend è servito da FastAPI su `/` (same origin).
+
+### Prerequisiti
+
+- Repo già clonato in `C:\Users\Valerio\tts` con venv e `.env` esistente
+- `.env` e `DATA_DIR` **non** vengono ricreati ad ogni deploy; aggiornare solo se il backend aggiunge nuove variabili
+- Default consigliato sul box: `TTS_DEVICE=cpu`, `TTS_MOCK_WORKER=1` (UI/API senza worker Qwen reale; il mock è valido finché il worker opzionale non è richiesto)
+
+### 1. Aggiornare il codice (`git pull`)
+
+```powershell
+cd C:\Users\Valerio\tts
+.\.venv\Scripts\Activate.ps1
+git fetch origin
+```
+
+**Fino a merge di PR #10 (Backend):** tirare il branch backend attualmente in esecuzione (es. `cursor/qwen3-tts-backend-b796` — verificare sul box con `git branch --show-current` se diverso):
+
+```powershell
+git checkout cursor/qwen3-tts-backend-b796
+git pull origin cursor/qwen3-tts-backend-b796
+```
+
+**Dopo che Backend marca #10 merge-ready:** passare al branch deployabile (tipicamente `main`):
+
+```powershell
+git checkout main
+git pull origin main
+```
+
+Non serve riclonare: stesso `C:\Users\Valerio\tts`, stesso `.env`, stesso `DATA_DIR`.
+
+### 2. Fermare il listener esistente su porta 8765
+
+Se uvicorn è già in esecuzione, liberare la porta prima del restart:
+
+```powershell
+$conn = Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($conn) {
+  $pid = $conn.OwningProcess
+  Write-Host "Stopping PID $pid on port 8765"
+  Stop-Process -Id $pid -Force
+} else {
+  Write-Host "No process listening on 8765"
+}
+```
+
+Alternativa se `Get-NetTCPConnection` non è disponibile:
+
+```powershell
+netstat -ano | findstr :8765
+# Annotare il PID nell'ultima colonna, poi:
+taskkill /PID <PID> /F
+```
+
+### 3. Riavviare FastAPI (bind `0.0.0.0:8765`)
+
+```powershell
+cd C:\Users\Valerio\tts
+.\.venv\Scripts\Activate.ps1
+uvicorn tts_server.main:app --host 0.0.0.0 --port 8765
+```
+
+`HOST` e `PORT` in `.env` devono restare allineati (`0.0.0.0` / `8765`) se l’app li legge all’avvio.
+
+### 4. Health check
+
+```powershell
+# Locale sul box
+curl http://127.0.0.1:8765/health
+
+# Pubblico via NPM (SSL su NPM, backend HTTP su LAN)
+curl https://tts.alevale.it/health
+```
+
+Risposta attesa: HTTP 200 (es. `{"status":"ok"}`).
+
+### 5. Frontend
+
+L’interfaccia web è su **`http://127.0.0.1:8765/`** (e `https://tts.alevale.it/` via NPM). Non avviare nginx, `npm run preview`, o altri server statici sul box.
+
+---
+
 ## Docker Compose
 
 **Non usato** per il percorso primario: singolo processo Python su Windows (CPU).
