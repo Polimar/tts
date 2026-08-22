@@ -305,21 +305,29 @@ Ogni riga = turno:
 
 Avatar opzionale per personaggio nel character manager e nell'editor turni. Il **colore UI** del personaggio resta lo **swatch** (barra riga, chip); non va dipinto sul busto.
 
+**Asset lock (3D/2D — non rigenerare né ridisegnare):** set consegnato; file su macchina condivisa in `docs/ui/avatars/`. Frontend importa **solo** questi path — nessuna variazione artistica in app.
+
+| Variante | Path (PNG + WebP) |
+|----------|-------------------|
+| Neutro | `docs/ui/avatars/avatar-neutro.png` · `docs/ui/avatars/avatar-neutro.webp` |
+| Uomo | `docs/ui/avatars/avatar-uomo.png` · `docs/ui/avatars/avatar-uomo.webp` |
+| Donna | `docs/ui/avatars/avatar-donna.png` · `docs/ui/avatars/avatar-donna.webp` |
+| Bambino | `docs/ui/avatars/avatar-bambino.png` · `docs/ui/avatars/avatar-bambino.webp` |
+| Anziano | `docs/ui/avatars/avatar-anziano.png` · `docs/ui/avatars/avatar-anziano.webp` |
+| Custom | `docs/ui/avatars/avatar-custom.png` · `docs/ui/avatars/avatar-custom.webp` |
+
 | Token | Valore |
 |-------|--------|
-| Frame sorgente | 512×512 px, PNG + WebP |
-| Display | 40 / 64 / 96 px (lista compatta / card / dettaglio) |
+| Frame sorgente | **512×512 px RGBA**, PNG + WebP (file sopra) |
+| Display | **40 / 64 / 96 px** — maschera circolare in **CSS** (`border-radius: 50%`), non baked nell'asset |
 | Inquadratura | Testa + spalle, volto ~60% altezza frame, frontale |
-| Maschera | Crop circolare safe (UI applica `border-radius: 50%`) |
 | Sfondo asset | Trasparente — niente disco, ombra o glow baked |
 | Stile | Illustrazione flat, 2–3 valori tonali, tratto 2 px @512, **no** outline nero, **no** fotoreal/PBR |
 | Espressione | Neutra, bocca chiusa |
-| Set predefinito (6) | **Neutro** · **Uomo** · **Donna** · **Bambino** · **Anziano** · **Custom** |
-| Variante Custom | Silhouette + plus / volto geometrico, stesso peso visivo del set |
 | Colore accent | Evitare riempimenti ampi di `#0F766E` sul busto |
-| Placeholder | Stesso crop/cerchio, fill `#D9D3C8` (nessun asset) |
+| Placeholder (nessun asset selezionato) | Stesso crop/cerchio in CSS, fill `#D9D3C8` — non un file illustrazione |
 
-Selezione avatar: picker griglia nel character manager; default **Neutro** alla creazione personaggio.
+Selezione avatar: picker griglia nel character manager; default **Neutro** (`avatar-neutro`) alla creazione personaggio.
 
 ---
 
@@ -414,3 +422,4 @@ Target primario: **workstation locale Windows** (Arc GPU).
 | 2026-08-22 | 1.1 | Avatar/busti personaggio v1.1 + token colore lock |
 | 2026-08-22 | 1.2 | Design room: identità teal, empty states lock, gap 350 ms fuori Impostazioni |
 | 2026-08-22 | 1.3 | Sound Designer lock: upload clone, export labels, progress libro, loudness engine-only |
+| 2026-08-22 | 1.4 | Avatar filenames lock in `docs/ui/avatars/` (asset 3D, no redraw) |
