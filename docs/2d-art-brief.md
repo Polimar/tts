@@ -21,6 +21,14 @@
 - **Coda bloccata:** solo badge amber `#B45309` sul job — nessuna illustrazione empty dedicata.
 - **Dialoghi empty CTA:** resta **Vai alle voci** (badge v1.1 solo su nav, non sulla CTA).
 
+## Avatar personaggi
+
+- **Formato:** PNG **512×512**, mostrato come cerchio in UI.
+- **Inquadratura:** busto (testa + spalle). Volto e spalle dentro area circolare safe; ~**8%** margine ai bordi del quadrato per crop sicuro.
+- **Stile:** stessa palette (teal/cream/ink). Flat editorial, no fotoreal, no mascotte.
+- **Uso:** chip UI per **Personaggio** (display) — non sono asset voce. Senza busto custom: fallback = **iniziali su cerchio teal** (non volto vuoto).
+- **Scala:** max **8 personaggi** in v1.1; in lista/editor colonna si vedono a **32/40 px** cerchio — 512 px è solo sorgente.
+
 ## Empty states — solo questi tre (richiesta UI Designer)
 
 ### 1) Voci
