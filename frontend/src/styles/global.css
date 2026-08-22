@@ -224,9 +224,9 @@ code {
 .chip--running,
 .chip--processing { background: rgba(91, 141, 239, 0.2); color: var(--color-running); }
 .chip--done,
+.chip--completed,
 .chip--ready { background: rgba(76, 175, 130, 0.2); color: var(--color-done); }
 .chip--failed { background: rgba(224, 92, 92, 0.2); color: var(--color-failed); }
-.chip--cancelled { background: rgba(107, 114, 128, 0.2); color: var(--color-queued); }
 
 .queue-hint {
   color: var(--color-text-muted);
@@ -782,7 +782,20 @@ code {
   padding: 1.25rem;
 }
 
+.voice-card__ref-text {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 0 0 0.75rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .detail-player__download {
+  display: flex;
+  gap: 0.5rem;
   margin-top: 1rem;
 }
 

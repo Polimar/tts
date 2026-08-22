@@ -1,10 +1,9 @@
 import type { ApiError } from '../types/api'
-
-const API_PREFIX = '/api/v1'
+import { getToken } from './token'
 
 export class HttpError extends Error {
   readonly status: number
-  readonly code: string
+  readonly code?: string
 
   constructor(status: number, body: ApiError) {
     super(body.detail)
@@ -14,16 +13,35 @@ export class HttpError extends Error {
   }
 }
 
+function detailFromBody(body: unknown): string {
+  if (!body || typeof body !== 'object') {
+    return 'Si è verificato un errore imprevisto.'
+  }
+  const record = body as Record<string, unknown>
+  if (typeof record.detail === 'string') return record.detail
+  if (Array.isArray(record.detail)) {
+    return record.detail
+      .map((item) => {
+        if (item && typeof item === 'object' && 'msg' in item) {
+          return String((item as { msg: unknown }).msg)
+        }
+        return String(item)
+      })
+      .join('; ')
+  }
+  if (typeof record.message === 'string') return record.message
+  return 'Si è verificato un errore imprevisto.'
+}
+
 async function parseError(response: Response): Promise<ApiError> {
   try {
-    const body = (await response.json()) as Partial<ApiError>
+    const body = (await response.json()) as Record<string, unknown>
     return {
-      code: body.code ?? 'errore_sconosciuto',
-      detail: body.detail ?? 'Si è verificato un errore imprevisto.',
+      code: typeof body.code === 'string' ? body.code : undefined,
+      detail: detailFromBody(body),
     }
   } catch {
     return {
-      code: 'errore_rete',
       detail: `Richiesta fallita (${response.status}).`,
     }
   }
@@ -33,13 +51,18 @@ export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(`${API_PREFIX}${path}`, {
-    credentials: 'include',
+  const token = getToken()
+  const headers: Record<string, string> = {
+    ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(init?.headers as Record<string, string> | undefined),
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  const response = await fetch(path, {
     ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...init?.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {
@@ -53,6 +76,17 @@ export async function apiFetch<T>(
   return (await response.json()) as T
 }
 
-export function audioUrl(jobId: string): string {
-  return `${API_PREFIX}/jobs/${jobId}/audio`
+export function jobWavUrl(jobId: string): string {
+  return `/jobs/${jobId}/download/wav`
+}
+
+export async function fetchAuthenticatedBlob(path: string): Promise<Blob> {
+  const token = getToken()
+  const response = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) {
+    throw new HttpError(response.status, await parseError(response))
+  }
+  return response.blob()
 }

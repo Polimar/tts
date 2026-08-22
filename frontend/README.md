@@ -2,7 +2,7 @@
 
 UI web italiana per la webapp TTS (clonazione vocale + sintesi).
 
-Contratto API: `docs/API.md`, `openapi.yaml` (branch `cursor/docs-architecture-api-145f` / PR #3).
+Contratto API: backend live su PR #10 (`cursor/qwen3-tts-backend-b796`), bind `0.0.0.0:8765`.
 
 ## Sviluppo
 
@@ -12,8 +12,12 @@ npm install
 npm run dev
 ```
 
-Il dev server Vite (`:5173`) fa proxy di `/api` verso il backend FastAPI su `http://localhost:8765`.
-Auth: cookie httpOnly `tts_session`, `credentials: 'include'`.
+Proxy Vite verso `http://localhost:8765` per `/auth`, `/voices`, `/jobs`, `/health`, `/system`.
+
+Auth: **Bearer token** (`Authorization: Bearer <token>`), salvato in sessionStorage.
+Registrazione: header `X-API-Key` (valore `API_KEY` dal `.env` del server).
+
+Opzionale in dev: `VITE_REGISTER_API_KEY=<API_KEY>` per precompilare la chiave in registrazione.
 
 ## Build
 
@@ -26,7 +30,7 @@ npm run preview
 
 | Path | Schermata |
 |------|-----------|
-| `/login` | Login / Registrazione |
+| `/login` | Login / Registrazione (username + password) |
 | `/voci` | Libreria voci |
 | `/nuovo` | Editor testo/libro |
 | `/coda` | Coda job |
@@ -35,6 +39,6 @@ npm run preview
 
 ## Extension points (Game Dev Web)
 
-- `data-gdw-waveform-container` su `AudioPlayer` — slot per waveform canvas
-- `data-gdw-book-editor` su `NewJobPage` — editor libro avanzato
-- `useJobPolling` / `useActiveJobsPolling` — sostituibili con SSE/WebSocket
+- `AudioPlayer`: prop `waveformSlot` + `data-gdw-waveform-container`
+- `NewJobPage`: `data-gdw-book-editor`
+- `useJobPolling` / `useActiveJobsPolling`

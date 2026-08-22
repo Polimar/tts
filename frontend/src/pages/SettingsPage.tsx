@@ -17,8 +17,8 @@ export function SettingsPage() {
         <h2>Account</h2>
         <dl className="detail-meta">
           <div>
-            <dt>Email</dt>
-            <dd>{user?.email}</dd>
+            <dt>Username</dt>
+            <dd>{user?.username}</dd>
           </div>
           <div>
             <dt>ID utente</dt>
@@ -36,15 +36,15 @@ export function SettingsPage() {
       <section className="settings-section">
         <h2>Sessione</h2>
         <p className="text-muted">
-          Autenticazione tramite cookie httpOnly <code>tts_session</code>.
+          Autenticazione tramite token Bearer (<code>Authorization: Bearer &lt;token&gt;</code>).
+          Il token è conservato in sessionStorage per il refresh della pagina.
         </p>
       </section>
 
       <section className="settings-section">
         <h2>Export</h2>
         <p className="text-muted">
-          Il formato di export predefinito sarà configurabile in una versione successiva.
-          Attualmente è disponibile il download WAV dal dettaglio job.
+          Download WAV/MP3 disponibile dal dettaglio job completato.
         </p>
       </section>
     </div>

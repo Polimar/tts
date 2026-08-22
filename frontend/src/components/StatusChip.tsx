@@ -3,9 +3,8 @@ import type { JobStatus } from '../types/api'
 const JOB_LABELS: Record<JobStatus, string> = {
   queued: 'In coda',
   running: 'In elaborazione',
-  done: 'Completato',
+  completed: 'Completato',
   failed: 'Errore',
-  cancelled: 'Annullato',
 }
 
 interface StatusChipProps {

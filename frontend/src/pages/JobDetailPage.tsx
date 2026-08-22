@@ -1,45 +1,46 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { cancelJob } from '../api/jobs'
-import { audioUrl } from '../api/client'
+import { fetchAuthenticatedBlob, jobWavUrl } from '../api/client'
 import { listVoices } from '../api/voices'
 import { AudioPlayer } from '../components/AudioPlayer'
-import { ConfirmDialog } from '../components/ConfirmDialog'
 import { StatusChip } from '../components/StatusChip'
-import { useToast } from '../components/ToastProvider'
 import { useJobPolling } from '../hooks/useJobPolling'
-import type { SourceType } from '../types/api'
-import { formatDateTime, formatProgressPercent } from '../utils/format'
-
-const SOURCE_LABELS: Record<SourceType, string> = {
-  text: 'Testo',
-  chapter: 'Capitolo',
-}
+import { formatDateTime } from '../utils/format'
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
-  const { job, loading, error, refetch } = useJobPolling(jobId ?? null)
-  const { showToast } = useToast()
-  const [showCancel, setShowCancel] = useState(false)
+  const { job, loading, error } = useJobPolling(jobId ?? null)
   const [voiceName, setVoiceName] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     if (!job) return
-    void listVoices().then(({ items }) => {
-      const v = items.find((x) => x.id === job.voice_id)
+    void listVoices().then((voices) => {
+      const v = voices.find((x) => x.id === job.voice_id)
       if (v) setVoiceName(v.name)
     })
   }, [job?.voice_id])
 
-  const handleCancel = async () => {
+  const fetchWav = useCallback(
+    () => fetchAuthenticatedBlob(jobWavUrl(job!.id)),
+    [job?.id],
+  )
+
+  const handleDownload = async () => {
     if (!job) return
+    setDownloading(true)
     try {
-      await cancelJob(job.id)
-      showToast('Job annullato.', 'success')
-      setShowCancel(false)
-      await refetch()
+      const blob = await fetchAuthenticatedBlob(jobWavUrl(job.id))
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `job-${job.id}.wav`
+      a.click()
+      URL.revokeObjectURL(url)
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Annullamento fallito.', 'error')
+      console.error(err)
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -77,9 +78,7 @@ export function JobDetailPage() {
     )
   }
 
-  const canPlay = job.status === 'done' && job.audio_ready === true
-  const audioSrc = canPlay ? audioUrl(job.id) : ''
-  const pct = formatProgressPercent(job.progress)
+  const canPlay = job.status === 'completed' && job.wav_available
 
   return (
     <div className="page">
@@ -88,28 +87,23 @@ export function JobDetailPage() {
           <p className="breadcrumb">
             <Link to="/coda">Coda</Link> / Dettaglio job
           </p>
-          <h1 className="page-header__title">
-            {job.title ?? `Job ${job.id.slice(0, 8)}`}
-          </h1>
+          <h1 className="page-header__title">Job {job.id.slice(0, 8)}</h1>
         </div>
-        <div className="page-header__actions">
-          <StatusChip status={job.status} />
-          {job.status === 'queued' && (
-            <button type="button" className="btn btn--danger btn--sm" onClick={() => setShowCancel(true)}>
-              Annulla
-            </button>
-          )}
-        </div>
+        <StatusChip status={job.status} />
       </header>
 
       <dl className="detail-meta">
         <div>
-          <dt>Tipo</dt>
-          <dd>{SOURCE_LABELS[job.source_type] ?? job.source_type}</dd>
-        </div>
-        <div>
           <dt>Voce</dt>
           <dd>{voiceName ?? job.voice_id}</dd>
+        </div>
+        <div>
+          <dt>Lingua</dt>
+          <dd>{job.language}</dd>
+        </div>
+        <div>
+          <dt>Chunk</dt>
+          <dd>{job.chunk_count}</dd>
         </div>
         <div>
           <dt>Creato</dt>
@@ -121,84 +115,82 @@ export function JobDetailPage() {
             <dd>{formatDateTime(job.started_at)}</dd>
           </div>
         )}
-        {job.finished_at && (
+        {job.completed_at && (
           <div>
-            <dt>Terminato</dt>
-            <dd>{formatDateTime(job.finished_at)}</dd>
+            <dt>Completato</dt>
+            <dd>{formatDateTime(job.completed_at)}</dd>
           </div>
         )}
-        {job.status === 'queued' && job.queue_position != null && (
+        {job.device_used && (
           <div>
-            <dt>Posizione coda</dt>
-            <dd>{job.queue_position}</dd>
-          </div>
-        )}
-        {job.status === 'running' && (
-          <div>
-            <dt>Progresso</dt>
-            <dd>
-              <div className="progress-bar progress-bar--inline">
-                <div className="progress-bar__fill" style={{ width: `${pct}%` }} />
-                <span className="progress-bar__label">{pct}%</span>
-              </div>
-            </dd>
+            <dt>Device</dt>
+            <dd>{job.device_used}</dd>
           </div>
         )}
       </dl>
 
       {job.status === 'failed' && (
         <div className="alert alert--error" role="alert">
-          {job.error_detail ?? 'Il job è terminato con un errore.'}
+          {job.error ?? 'Il job è terminato con un errore.'}
         </div>
       )}
 
       {job.status === 'queued' && (
         <div className="alert alert--info" role="status">
-          Il job è in coda
-          {job.queue_position != null ? ` (posizione ${job.queue_position})` : ''}.
-          Verrà elaborato a breve.
+          Il job è in coda. Verrà elaborato a breve (un job alla volta).
         </div>
       )}
 
       {job.status === 'running' && (
         <div className="alert alert--info" role="status">
-          Sintesi in corso ({pct}%)… La pagina si aggiorna automaticamente.
+          Sintesi in corso… La pagina si aggiorna automaticamente.
         </div>
       )}
 
-      {job.status === 'cancelled' && (
-        <div className="alert alert--info" role="status">
-          Job annullato.
-        </div>
-      )}
+      <section className="detail-text">
+        <h2>Testo</h2>
+        <pre className="detail-text__content">{job.text}</pre>
+      </section>
 
       {canPlay && (
         <section className="detail-player">
           <h2>Riproduzione</h2>
-          <AudioPlayer src={audioSrc} />
+          <AudioPlayer fetchAudio={fetchWav} />
           <div className="detail-player__download">
-            <a href={audioSrc} download={`${job.title ?? job.id}.wav`} className="btn btn--secondary">
-              Scarica WAV
-            </a>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={downloading}
+              onClick={() => void handleDownload()}
+            >
+              {downloading ? 'Download…' : 'Scarica WAV'}
+            </button>
+            {job.mp3_available && (
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={downloading}
+                onClick={() => void fetchAuthenticatedBlob(`/jobs/${job.id}/download/mp3`).then((blob) => {
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `job-${job.id}.mp3`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                })}
+              >
+                Scarica MP3
+              </button>
+            )}
           </div>
         </section>
       )}
 
-      {job.status === 'done' && !job.audio_ready && (
+      {job.status === 'completed' && !job.wav_available && (
         <div className="alert alert--error" role="alert">
           L'audio non è ancora disponibile.
         </div>
       )}
-
-      <ConfirmDialog
-        open={showCancel}
-        title="Annulla job"
-        message="Sei sicuro di voler annullare questo job in coda?"
-        confirmLabel="Annulla job"
-        destructive
-        onConfirm={() => void handleCancel()}
-        onCancel={() => setShowCancel(false)}
-      />
     </div>
   )
 }

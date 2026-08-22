@@ -6,13 +6,16 @@ import { useToast } from '../components/ToastProvider'
 
 type AuthMode = 'login' | 'register'
 
+const DEFAULT_API_KEY = import.meta.env.VITE_REGISTER_API_KEY ?? ''
+
 export function LoginPage() {
   const { user, loading, login, register } = useAuth()
   const navigate = useNavigate()
   const { showToast } = useToast()
   const [mode, setMode] = useState<AuthMode>('login')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [apiKey, setApiKey] = useState(DEFAULT_API_KEY)
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -27,15 +30,18 @@ export function LoginPage() {
 
     try {
       if (mode === 'login') {
-        await login(email, password)
+        await login(username, password)
       } else {
-        await register(email, password)
+        if (!apiKey.trim()) {
+          throw new Error('Chiave API richiesta per la registrazione (header X-API-Key).')
+        }
+        await register(username, password, apiKey.trim())
       }
 
       let redirectTo = '/coda'
       try {
-        const { items } = await listVoices()
-        if (items.length === 0) redirectTo = '/voci'
+        const voices = await listVoices()
+        if (voices.length === 0) redirectTo = '/voci'
       } catch {
         redirectTo = '/voci'
       }
@@ -75,15 +81,17 @@ export function LoginPage() {
 
         <form className="auth-form" onSubmit={(e) => void handleSubmit(e)}>
           <label className="field">
-            <span className="field__label">Email</span>
+            <span className="field__label">Username</span>
             <input
-              type="email"
+              type="text"
               className="field__input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               required
-              autoComplete="email"
-              placeholder="nome@esempio.it"
+              minLength={3}
+              maxLength={64}
+              autoComplete="username"
+              placeholder="mario.rossi"
             />
           </label>
 
@@ -100,6 +108,23 @@ export function LoginPage() {
               placeholder="Minimo 8 caratteri"
             />
           </label>
+
+          {mode === 'register' && (
+            <label className="field">
+              <span className="field__label">Chiave API (X-API-Key)</span>
+              <input
+                type="password"
+                className="field__input"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                required
+                placeholder="Valore di API_KEY dal server"
+              />
+              <span className="field__hint">
+                Richiesta dal backend per la registrazione. Imposta VITE_REGISTER_API_KEY in dev.
+              </span>
+            </label>
+          )}
 
           {fieldError && (
             <p className="field__error" role="alert">

@@ -9,13 +9,14 @@ import {
 } from 'react'
 import * as authApi from '../api/auth'
 import { HttpError } from '../api/client'
+import { getToken, setToken } from '../api/token'
 import type { User } from '../types/api'
 
 interface AuthContextValue {
   user: User | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
+  register: (username: string, password: string, apiKey: string) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -27,15 +28,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setUser(null)
+      return
+    }
     try {
       const me = await authApi.getMe()
       setUser(me)
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) {
-        setUser(null)
-      } else {
-        setUser(null)
+        setToken(null)
       }
+      setUser(null)
     }
   }, [])
 
@@ -47,14 +51,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })()
   }, [refresh])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const me = await authApi.login({ email, password })
-    setUser(me)
+  const login = useCallback(async (username: string, password: string) => {
+    const response = await authApi.login({ username, password })
+    setUser(response.user)
   }, [])
 
-  const register = useCallback(async (email: string, password: string) => {
-    const me = await authApi.register({ email, password })
-    setUser(me)
+  const register = useCallback(async (username: string, password: string, apiKey: string) => {
+    const response = await authApi.register({ username, password }, apiKey)
+    setUser(response.user)
   }, [])
 
   const logout = useCallback(async () => {

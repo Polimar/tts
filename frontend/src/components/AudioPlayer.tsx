@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 interface AudioPlayerProps {
-  src: string
+  /** URL remoto — verrà scaricato con Bearer token e riprodotto come blob */
+  fetchAudio: () => Promise<Blob>
   /** Extension point GDW: container per waveform canvas/WebGL */
   waveformSlot?: React.ReactNode
 }
@@ -15,14 +16,49 @@ function formatTime(seconds: number): string {
 
 /**
  * Player audio con barra di progresso.
+ * Scarica l'audio autenticato via fetch e lo riproduce come blob URL.
  * Extension point GDW: passare `waveformSlot` per sostituire la barra semplice.
  */
-export function AudioPlayer({ src, waveformSlot }: AudioPlayerProps) {
+export function AudioPlayer({ fetchAudio, waveformSlot }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
+  const blobUrlRef = useRef<string | null>(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [playbackRate, setPlaybackRate] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    void (async () => {
+      try {
+        const blob = await fetchAudio()
+        if (cancelled) return
+        const url = URL.createObjectURL(blob)
+        blobUrlRef.current = url
+        const audio = audioRef.current
+        if (audio) audio.src = url
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Impossibile caricare l\'audio.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
+    }
+  }, [fetchAudio])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -40,10 +76,10 @@ export function AudioPlayer({ src, waveformSlot }: AudioPlayerProps) {
       audio.removeEventListener('loadedmetadata', onLoaded)
       audio.removeEventListener('ended', onEnded)
     }
-  }, [src])
+  }, [])
 
   useEffect(() => {
-  const audio = audioRef.current
+    const audio = audioRef.current
     if (audio) audio.playbackRate = playbackRate
   }, [playbackRate])
 
@@ -69,9 +105,17 @@ export function AudioPlayer({ src, waveformSlot }: AudioPlayerProps) {
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
+  if (loading) {
+    return <p className="text-muted">Caricamento audio…</p>
+  }
+
+  if (error) {
+    return <p className="field__error" role="alert">{error}</p>
+  }
+
   return (
     <div className="audio-player" data-gdw-waveform-container>
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio ref={audioRef} preload="metadata" />
 
       {waveformSlot ?? (
         <div className="audio-player__progress">

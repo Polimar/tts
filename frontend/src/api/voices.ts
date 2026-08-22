@@ -1,18 +1,25 @@
 import { apiFetch } from './client'
-import type { Voice, VoiceListResponse } from '../types/api'
+import type { Voice } from '../types/api'
 
-export function listVoices(): Promise<VoiceListResponse> {
-  return apiFetch<VoiceListResponse>('/voices')
+export function listVoices(): Promise<Voice[]> {
+  return apiFetch<Voice[]>('/voices')
 }
 
 export function getVoice(id: string): Promise<Voice> {
   return apiFetch<Voice>(`/voices/${id}`)
 }
 
-export function createVoice(name: string, audioFile: File): Promise<Voice> {
+export function createVoice(
+  name: string,
+  refText: string,
+  language: string,
+  audioFile: File,
+): Promise<Voice> {
   const form = new FormData()
   form.append('name', name)
-  form.append('reference_audio', audioFile)
+  form.append('ref_text', refText)
+  form.append('language', language)
+  form.append('audio', audioFile)
   return apiFetch<Voice>('/voices', {
     method: 'POST',
     body: form,

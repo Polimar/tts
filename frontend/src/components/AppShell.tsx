@@ -54,7 +54,7 @@ export function AppShell() {
             ☰
           </button>
           <div className="app-header__user">
-            <span className="app-header__email">{user?.email}</span>
+            <span className="app-header__email">{user?.username}</span>
             <button type="button" className="btn btn--ghost" onClick={() => void handleLogout()}>
               Esci
             </button>
