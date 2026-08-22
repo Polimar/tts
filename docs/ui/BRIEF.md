@@ -6,7 +6,10 @@
 **Lingua UI:** italiano (unica lingua in v1)  
 **Audience doc:** Frontend, Sound Designer, 2D Artist, Game Designer
 
-**Audio source of truth:** regole di pipeline, codec e loudness in [`docs/audio/BRIEF.md`](../audio/BRIEF.md) (PR in arrivo). Questo brief descrive **solo superfici UI** — non inventare regole audio oltre quanto riportato sotto.
+**Audio source of truth:** regole di pipeline, codec e loudness in [`docs/audio/BRIEF.md`](../audio/BRIEF.md) (PR in arrivo).  
+**Schema dialoghi source of truth:** [`docs/design/`](../design/) — [PR #11](https://github.com/Polimar/tts/pull/11) (`dialogue-v1.1.schema.json`, `dialogue-v1.1.example.json`, `DIALOGUE.md`).
+
+Questo brief descrive **solo superfici UI** — non inventare regole audio oltre quanto riportato sotto.
 
 ---
 
@@ -246,12 +249,14 @@ Formato default pre-selezionato da Impostazioni utente.
 
 ### Modello dati (lock Game Designer)
 
-| Entità | Definizione |
+**Schema:** [`docs/design/dialogue-v1.1.schema.json`](../design/dialogue-v1.1.schema.json) · note in [`docs/design/DIALOGUE.md`](../design/DIALOGUE.md).
+
+| Entità | Chiavi lock |
 |--------|-------------|
-| **Dialogo** | Lista ordinata di **turni** |
-| **Turno** | `characterId`, `text`, `gapMs` (0–1500 ms; default `defaultGapMs` **350**) |
-| **Personaggio** | `voiceId`, `name`, `color`, `speed`, `pitch`, `avatar?` — **non** `displayName` / `avatarId` |
-| **Job dialogo** | N job TTS (1 turno = 1 chunk) → concat WAV in ordine; gap stitch = **350 ms** (costante prodotto, editabile solo per-turno) |
+| **Character** | `id`, `voiceId`, `name`, `color`, `speed`, `pitch`, `avatar?` |
+| **Turn** | `id`, `characterId`, `text`, `gapMs?` (omit = `defaultGapMs` **350**) |
+| **Dialogue** | `characters` **1–8**, `turns` **1–40**, `defaultGapMs` **350**, `text` ≤ **4000** char/turn |
+| **Job dialogo** | N job TTS (1 turn = 1 chunk) → concat WAV; gap stitch da `gapMs` o `defaultGapMs` |
 
 ### Regole invarianti
 
@@ -386,7 +391,7 @@ Target primario: **workstation locale Windows** (Arc GPU).
 |------|-------------------------------|---------------------------|
 | **Sound Designer** | Superfici upload/export, progress libro | [`docs/audio/BRIEF.md`](../audio/BRIEF.md): formati, durata clone, loudness, gap engine, export codec |
 | **2D Artist** | Empty states lock, identità visiva, badge v1.1, icon set 2 px | Logo (balloon+waveform), favicon, illustrazioni empty, avatar busti |
-| **Game Designer** | Contratto dialoghi, gap 350 ms costante, caps, export ZIP | Schema turno/personaggio, stitch rules, gap per-turno 0–1500 ms |
+| **Game Designer** | Contratto dialoghi, gap 350 ms costante, caps, export ZIP | [`docs/design/`](../design/): schema, example, `DIALOGUE.md` |
 | **Backend** | Auth, job states, file download | OpenAPI o equivalente per stati job/voce |
 
 ---
@@ -420,7 +425,7 @@ Target primario: **workstation locale Windows** (Arc GPU).
 
 Checklist ticketabile per Frontend. **Nessun codice React in questo doc.** Tutti i lock precedenti (teal, empty states, Sound, gap 350 ms, avatar path) restano validi.
 
-**Game Designer (JSON):** chiavi **camelCase in inglese**. Schema personaggi/dialoghi in arrivo nel repo; i **libri non sono** in quel JSON. **Non usare** `displayName` / `avatarId` — usare `name` / `avatar`.
+**Game Designer (JSON):** chiavi **camelCase in inglese**, allineate a [`docs/design/`](../design/) ([PR #11](https://github.com/Polimar/tts/pull/11)). I **libri non sono** in quel schema.
 
 ### Empty states
 
@@ -500,36 +505,38 @@ Chiavi camelCase per i18n Frontend. **Non aggiungere stringhe** oltre questo set
 
 ### Binding JSON (campo UI → chiave)
 
-Schema file in arrivo nel repo; binding minimo per Sprint 2:
+**Source of truth Frontend:** cartella [`docs/design/`](../design/) — validare contro `dialogue-v1.1.schema.json`; esempio in `dialogue-v1.1.example.json`. **Non rinominare chiavi.**
 
-**Personaggio (`Character`)** — chiavi lock: `voiceId`, `name`, `color`, `speed`, `pitch`, `avatar?` (opzionale). **Non** `displayName` / `avatarId`.
+**Character**
 
 | Campo UI | Chiave JSON | Note |
 |----------|-------------|------|
-| Voce collegata | `voiceId` | Obbligatorio; voce utente in stato pronta |
+| ID personaggio | `id` | Univoco in `characters[]` |
+| Voce collegata | `voiceId` | Obbligatorio; voce utente ready |
 | Nome | `name` | — |
-| Colore swatch / barra riga | `color` | Hex o token — non sul busto |
-| Velocità default | `speed` | — |
-| Pitch default | `pitch` | — |
-| Avatar (opzionale) | `avatar` | Filename es. `avatar-neutro` → risolve in `docs/ui/avatars/` |
+| Colore swatch / barra riga | `color` | Hex — non sul busto |
+| Velocità default | `speed` | Default schema: 1.0 |
+| Pitch default | `pitch` | Default schema: 1.0 |
+| Avatar (opzionale) | `avatar` | Es. `avatar-neutro` → `docs/ui/avatars/` |
 
-**Dialogo (`Dialogue`)**
-
-| Campo UI | Chiave JSON | Note |
-|----------|-------------|------|
-| Lista personaggi | `characters` | Array **1–8** |
-| Lista turni | `turns` | Array **1–40** |
-| Gap stitch default | `defaultGapMs` | **350** — solo in JSON; **non** in Impostazioni |
-
-**Turno (`Turn`)** — chiavi lock: `characterId`, `text`, `gapMs`
+**Turn**
 
 | Campo UI | Chiave JSON | Vincoli |
 |----------|-------------|---------|
+| ID turno | `id` | Univoco in `turns[]` |
 | Speaker | `characterId` | Ref a `characters[].id` |
-| Testo | `text` | Max **4000** char (hard block) |
-| Gap dopo turno | `gapMs` | **0–1500**; default eredita `defaultGapMs` (350) |
+| Testo | `text` | **1–4000** char (hard block UI) |
+| Gap dopo turno | `gapMs` | Opzionale **0–1500**; se omesso → `defaultGapMs` (**350**) |
 
-**Libri:** fuori da questo JSON — job `type: libro` via API coda; un job, una voce, testo sorgente file/incolla.
+**Dialogue**
+
+| Campo UI | Chiave JSON | Vincoli |
+|----------|-------------|---------|
+| Personaggi | `characters` | Array **1–8** |
+| Turni | `turns` | Array **1–40**, ordinati |
+| Gap stitch default | `defaultGapMs` | **350** — costante prodotto; **non** in Impostazioni |
+
+**Libri:** fuori da `docs/design/` — job `type: libro` via API coda; un job, una voce, testo sorgente file/incolla.
 
 ### Ticket suggeriti (Sprint 2)
 
@@ -540,7 +547,7 @@ Schema file in arrivo nel repo; binding minimo per Sprint 2:
 - [ ] Tabella coda: 5 stati, 3 tipi, progress Frase N/M su libri
 - [ ] Stato `bloccato`: badge ambra, `errVoiceMissingJob`, CTA Vai alle voci, no audio placeholder
 - [ ] Caps dialogo: 8 / 40 / 4000 enforced in UI
-- [ ] Form dialogo: bind `characters`, `turns`, `defaultGapMs`, campi turno
+- [ ] Form dialogo: bind schema `docs/design/` (`id`, `characters`, `turns`, `defaultGapMs`, campi Character/Turn)
 - [ ] Player export labels WAV/MP3; ZIP solo `dialogo`
 - [ ] Login errori inline + toast rete
 
@@ -558,3 +565,4 @@ Schema file in arrivo nel repo; binding minimo per Sprint 2:
 | 2026-08-22 | 1.5 | 2D lock: margine 8% busto, display 32/40 liste, iniziali su teal se mancante |
 | 2026-08-22 | 1.6 | Sprint 2: checklist implementazione Frontend + binding JSON camelCase |
 | 2026-08-22 | 1.7 | Copy keys lock IT upload/voce; JSON `name`/`avatar`; CTA Vai alle voci |
+| 2026-08-22 | 1.8 | JSON binding allineato a `docs/design/` (PR #11): `id`, `gapMs?` |
