@@ -11,21 +11,9 @@ enum class JobStatus {
     @SerialName("running")
     RUNNING,
 
-    @SerialName("done")
-    DONE,
+    @SerialName("completed")
+    COMPLETED,
 
     @SerialName("failed")
     FAILED,
-
-    @SerialName("cancelled")
-    CANCELLED,
-}
-
-/** Valore query `status` per `GET /jobs`. */
-fun JobStatus.toApiValue(): String = when (this) {
-    JobStatus.QUEUED -> "queued"
-    JobStatus.RUNNING -> "running"
-    JobStatus.DONE -> "done"
-    JobStatus.FAILED -> "failed"
-    JobStatus.CANCELLED -> "cancelled"
 }

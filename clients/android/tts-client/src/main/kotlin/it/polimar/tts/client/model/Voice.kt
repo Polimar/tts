@@ -7,14 +7,9 @@ import kotlinx.serialization.Serializable
 data class Voice(
     val id: String,
     val name: String,
-    @SerialName("duration_sec")
-    val durationSec: Float? = null,
+    @SerialName("ref_text")
+    val refText: String,
+    val language: String,
     @SerialName("created_at")
     val createdAt: String,
-)
-
-@Serializable
-data class VoiceListResponse(
-    val items: List<Voice>,
-    val total: Int,
 )

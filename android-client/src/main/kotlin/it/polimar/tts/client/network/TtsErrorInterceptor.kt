@@ -5,10 +5,7 @@ import it.polimar.tts.client.TtsErrorParser
 import okhttp3.Interceptor
 import okhttp3.Response
 
-/**
- * Converte risposte di errore JSON `{code, detail}` in [TtsApiException]
- * (incluso HTTP 409 [it.polimar.tts.client.model.ErrorCode.QUEUE_FULL]).
- */
+/** Converte risposte di errore FastAPI `{detail}` in [TtsApiException]. */
 class TtsErrorInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val response = chain.proceed(chain.request())

@@ -1,17 +1,17 @@
 package it.polimar.tts.client
 
 /**
- * Costanti condivise allineate a `openapi.yaml` (PR #3 / Architect).
+ * Costanti allineate al backend live (PR #10 `tts_server`).
  */
 object TtsApiConstants {
-    const val SESSION_COOKIE_NAME = "tts_session"
-
-    const val API_PREFIX = "/api/v1"
+    const val HEADER_AUTHORIZATION = "Authorization"
+    const val HEADER_API_KEY = "X-API-Key"
+    const val BEARER_PREFIX = "Bearer "
 
     const val DEFAULT_HOST = "http://127.0.0.1:8765"
+    const val DEFAULT_EMULATOR_HOST = "http://10.0.2.2:8765"
 
-    fun baseUrl(host: String = DEFAULT_HOST): String =
-        host.trimEnd('/') + API_PREFIX
+    fun baseUrl(host: String = DEFAULT_HOST): String = host.trimEnd('/')
 
     object Paths {
         const val AUTH_REGISTER = "/auth/register"
@@ -24,29 +24,19 @@ object TtsApiConstants {
 
         const val JOBS = "/jobs"
         fun job(jobId: String) = "/jobs/$jobId"
-        fun jobCancel(jobId: String) = "/jobs/$jobId/cancel"
-        fun jobAudio(jobId: String) = "/jobs/$jobId/audio"
+        fun jobDownloadWav(jobId: String) = "/jobs/$jobId/download/wav"
+        fun jobDownloadMp3(jobId: String) = "/jobs/$jobId/download/mp3"
     }
 
     object VoiceMultipart {
         const val FIELD_NAME = "name"
-        const val FIELD_REFERENCE_AUDIO = "reference_audio"
+        const val FIELD_REF_TEXT = "ref_text"
+        const val FIELD_LANGUAGE = "language"
+        const val FIELD_AUDIO = "audio"
     }
 
     object Audio {
         const val MIME_WAV = "audio/wav"
-        const val HEADER_RANGE = "Range"
-        const val HEADER_ACCEPT_RANGES = "Accept-Ranges"
-        const val HEADER_CONTENT_RANGE = "Content-Range"
-
-        fun rangeBytes(start: Long, end: Long): String = "bytes=$start-$end"
-
-        fun rangeBytes(range: LongRange): String = rangeBytes(range.first, range.last)
+        const val MIME_MP3 = "audio/mpeg"
     }
-
-    /** Massimo job in coda FIFO (oltre → HTTP 409 `queue_full`). */
-    const val MAX_QUEUED_JOBS = 10
-
-    /** Slot GPU: al massimo un job `running`. */
-    const val MAX_RUNNING_JOBS = 1
 }

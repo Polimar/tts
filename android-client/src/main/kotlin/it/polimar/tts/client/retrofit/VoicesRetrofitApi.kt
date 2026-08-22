@@ -1,7 +1,6 @@
 package it.polimar.tts.client.retrofit
 
 import it.polimar.tts.client.model.Voice
-import it.polimar.tts.client.model.VoiceListResponse
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
@@ -14,13 +13,15 @@ import retrofit2.http.Path
 
 interface VoicesRetrofitApi {
     @GET("voices")
-    suspend fun listVoices(): VoiceListResponse
+    suspend fun listVoices(): List<Voice>
 
     @Multipart
     @POST("voices")
     suspend fun createVoice(
         @Part("name") name: RequestBody,
-        @Part referenceAudio: MultipartBody.Part,
+        @Part("ref_text") refText: RequestBody,
+        @Part("language") language: RequestBody,
+        @Part audio: MultipartBody.Part,
     ): Response<Voice>
 
     @GET("voices/{voice_id}")
