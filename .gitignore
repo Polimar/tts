@@ -1,0 +1,43 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# User data and runtime outputs (DATA_DIR default)
+data/
+outputs/
+
+# Model caches
+models/
+.cache/
+huggingface/
+
+# Generated audio
+*.wav
+*.mp3
+!**/fixtures/**/*.wav
+!**/fixtures/**/*.mp3
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+tmp/
+temp/
