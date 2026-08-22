@@ -1,0 +1,81 @@
+from datetime import datetime
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    created_at: str
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    expires_at: str
+    user: UserOut
+
+
+class VoiceOut(BaseModel):
+    id: str
+    name: str
+    ref_text: str
+    language: str
+    created_at: str
+
+
+class JobCreateRequest(BaseModel):
+    voice_id: str
+    text: str = Field(min_length=1)
+    language: str = "Italian"
+
+
+JobStatus = Literal["queued", "running", "completed", "failed"]
+
+
+class JobOut(BaseModel):
+    id: str
+    voice_id: str
+    status: JobStatus
+    language: str
+    text: str
+    chunk_count: int
+    error: Optional[str] = None
+    wav_available: bool
+    mp3_available: bool
+    device_used: Optional[str] = None
+    created_at: str
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class HealthOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+
+
+class DeviceInfoOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    device: str
+    status: str
+
+
+ReadyStatus = Literal["ready", "booting", "failed"]
+
+
+class ReadyOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ReadyStatus
