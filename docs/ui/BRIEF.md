@@ -318,14 +318,16 @@ Avatar opzionale per personaggio nel character manager e nell'editor turni. Il *
 
 | Token | Valore |
 |-------|--------|
-| Frame sorgente | **512×512 px RGBA**, PNG + WebP (file sopra) |
-| Display | **40 / 64 / 96 px** — maschera circolare in **CSS** (`border-radius: 50%`), non baked nell'asset |
+| Frame sorgente | **512×512 px RGBA**, PNG + WebP (file sopra); **~8% margine** al bordo del quadrato (già tondo-safe) |
+| Display liste | **32 / 40 px** (griglia voci, righe compatte) |
+| Display editor / dettaglio | **64 / 96 px** (character manager, editor turni, card dettaglio) |
+| Maschera | Circolare in **CSS** (`border-radius: 50%`), non baked nell'asset |
 | Inquadratura | Testa + spalle, volto ~60% altezza frame, frontale |
 | Sfondo asset | Trasparente — niente disco, ombra o glow baked |
 | Stile | Illustrazione flat, 2–3 valori tonali, tratto 2 px @512, **no** outline nero, **no** fotoreal/PBR |
 | Espressione | Neutra, bocca chiusa |
 | Colore accent | Evitare riempimenti ampi di `#0F766E` sul busto |
-| Placeholder (nessun asset selezionato) | Stesso crop/cerchio in CSS, fill `#D9D3C8` — non un file illustrazione |
+| Busto mancante / senza asset | **Iniziali** del personaggio su cerchio teal `#0F766E` — **mai** placeholder volto vuoto o silhouette generica |
 
 Selezione avatar: picker griglia nel character manager; default **Neutro** (`avatar-neutro`) alla creazione personaggio.
 
@@ -423,3 +425,4 @@ Target primario: **workstation locale Windows** (Arc GPU).
 | 2026-08-22 | 1.2 | Design room: identità teal, empty states lock, gap 350 ms fuori Impostazioni |
 | 2026-08-22 | 1.3 | Sound Designer lock: upload clone, export labels, progress libro, loudness engine-only |
 | 2026-08-22 | 1.4 | Avatar filenames lock in `docs/ui/avatars/` (asset 3D, no redraw) |
+| 2026-08-22 | 1.5 | 2D lock: margine 8% busto, display 32/40 liste, iniziali su teal se mancante |
