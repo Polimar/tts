@@ -8,12 +8,14 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-os.environ["MOCK_WORKER"] = "1"
+os.environ["TTS_MOCK_WORKER"] = "1"
+os.environ.pop("MOCK_WORKER", None)
 os.environ["JWT_SECRET"] = "test-jwt-secret"
 os.environ["API_KEY"] = "test-api-key"
 os.environ["QUEUE_POLL_SECONDS"] = "0.1"
 os.environ["DEBUG"] = "0"
 os.environ.pop("DEV", None)
+os.environ.pop("ALLOW_PUBLIC_REGISTRATION", None)
 
 from tts_server.main import create_app
 
@@ -140,6 +142,39 @@ def test_register_requires_api_key(client: TestClient):
         json={"username": "nokey", "password": "password123"},
     )
     assert resp.status_code == 401
+
+
+def test_register_public_when_allowed(tmp_path: Path):
+    os.environ["DATA_DIR"] = str(tmp_path / "data")
+    os.environ["ALLOW_PUBLIC_REGISTRATION"] = "1"
+    from tts_server import config as config_module
+    from tts_server.db import database as db_module
+    from tts_server.worker import qwen3_worker as worker_module
+
+    config_module.settings = config_module.Settings()
+    assert config_module.settings.allow_public_registration is True
+    db_module._db = None
+    db_module._db_bound_path = None
+    worker_module._worker = None
+    worker_module._queue = None
+
+    app = create_app()
+    with TestClient(app) as test_client:
+        resp = test_client.post(
+            f"{API}/auth/register",
+            json={"username": "publicuser", "password": "password123"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["user"]["username"] == "publicuser"
+
+
+def test_tts_mock_worker_env_alias(tmp_path: Path):
+    os.environ.pop("MOCK_WORKER", None)
+    os.environ["TTS_MOCK_WORKER"] = "1"
+    from tts_server import config as config_module
+
+    cfg = config_module.Settings()
+    assert cfg.mock_worker is True
 
 
 def test_auth_isolation_and_job_flow(client: TestClient):

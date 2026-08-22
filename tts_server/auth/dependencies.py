@@ -4,7 +4,6 @@ from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from tts_server.auth.cookies import SESSION_COOKIE
-from tts_server.config import settings
 from tts_server.db.database import get_db
 from tts_server.services.security import validate_safe_segment
 
@@ -44,6 +43,10 @@ def get_current_user_id(
 
 
 def verify_api_key(x_api_key: Optional[str] = None) -> None:
+    from tts_server.config import settings
+
+    if settings.allow_public_registration:
+        return
     if settings.mock_worker and settings.api_key.startswith("change-me"):
         return
     if not x_api_key or x_api_key != settings.api_key:

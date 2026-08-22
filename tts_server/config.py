@@ -31,6 +31,15 @@ def _env_bool(key: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_bool_first(keys: tuple[str, ...], default: bool) -> bool:
+    """First set env key wins (DevOps aliases e.g. TTS_MOCK_WORKER vs MOCK_WORKER)."""
+    for key in keys:
+        raw = os.getenv(key)
+        if raw is not None and raw.strip():
+            return raw.strip().lower() in ("1", "true", "yes", "on")
+    return default
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -93,6 +102,7 @@ class Settings:
     chunk_max_chars: int
     warmup_text: str
     mock_worker: bool
+    allow_public_registration: bool
     queue_poll_seconds: float
     login_rate_limit_per_minute: int
     debug_mode: bool
@@ -114,7 +124,8 @@ class Settings:
             "WARMUP_TEXT",
             "Ciao, questo è un test di sintesi vocale.",
         )
-        self.mock_worker = _env_bool("MOCK_WORKER", False)
+        self.mock_worker = _env_bool_first(("TTS_MOCK_WORKER", "MOCK_WORKER"), False)
+        self.allow_public_registration = _env_bool("ALLOW_PUBLIC_REGISTRATION", False)
         self.queue_poll_seconds = _env_float("QUEUE_POLL_SECONDS", 0.5)
         self.login_rate_limit_per_minute = _env_int("LOGIN_RATE_LIMIT_PER_MINUTE", 10)
         self.debug_mode = _env_bool("DEBUG", False) or _env_bool("DEV", False)

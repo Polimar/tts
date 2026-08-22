@@ -113,7 +113,7 @@ class Qwen3Worker:
             )
             self._device = "cpu"
             self._initialized = True
-            logger.info("XPU gate: SKIPPED (MOCK_WORKER=1) -> device=cpu")
+            logger.info("XPU gate: SKIPPED (TTS_MOCK_WORKER/MOCK_WORKER=1) -> device=cpu")
             return self._info
 
         import torch

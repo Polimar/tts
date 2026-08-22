@@ -27,6 +27,8 @@ def mount_frontend(app: FastAPI) -> None:
     index_path = dist / "index.html"
     assets_dir = dist / "assets"
 
+    logger.info("Serving frontend SPA from %s at GET /", dist)
+
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
