@@ -182,7 +182,7 @@ Lista vuota: illustrazione lista vuota + CTA **Nuovo job** → `/nuovo`
 
 - Click riga → `/coda/:jobId` (Player / dettaglio)
 - Loading lista: **skeleton**
-- Job in elaborazione: progress **determinato** se backend espone %
+- Job in elaborazione: progress **determinato** se backend espone %; job **Libro**: «Frase N / M» (o stima), titolo capitolo solo se presente nel sorgente
 
 ---
 
