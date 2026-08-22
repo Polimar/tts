@@ -85,6 +85,26 @@ def test_static_index(client: TestClient):
     assert "/assets/" in resp.text
 
 
+def test_root_api_paths_not_served_as_html(client: TestClient):
+    for path in ("/auth", "/auth/login", "/voices", "/jobs", "/jobs/abc", "/system/device"):
+        resp = client.get(path)
+        assert resp.status_code == 404
+        assert "TTS Studio" not in resp.text
+    post = client.post(
+        "/auth/register",
+        json={"username": "ghost", "password": "password123"},
+    )
+    assert post.status_code in (404, 405)
+    assert "TTS Studio" not in post.text
+
+
+def test_spa_client_routes_still_serve_html(client: TestClient):
+    for path in ("/voci", "/coda", "/login", "/nuovo", "/impostazioni"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert "TTS Studio" in resp.text
+
+
 def test_openapi_and_docs_disabled(client: TestClient):
     assert client.get("/openapi.json").status_code == 404
     assert client.get("/docs").status_code == 404

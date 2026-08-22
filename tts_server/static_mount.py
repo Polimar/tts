@@ -1,13 +1,36 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from tts_server.config import _repo_root
 
 logger = logging.getLogger(__name__)
+
+# Root segments reserved for API — SPA must never serve HTML for these paths.
+_RESERVED_API_SEGMENTS = frozenset({"api", "auth", "voices", "jobs", "system"})
+_RESERVED_EXACT_PATHS = frozenset(
+    {
+        "health",
+        "openapi.json",
+        "docs",
+        "redoc",
+    }
+)
+
+
+def is_reserved_api_path(full_path: str) -> bool:
+    """True if path belongs to API surface, not the SPA."""
+    if not full_path:
+        return False
+    if full_path in _RESERVED_EXACT_PATHS:
+        return True
+    if full_path.startswith("api/"):
+        return True
+    first_segment = full_path.split("/", 1)[0]
+    return first_segment in _RESERVED_API_SEGMENTS
 
 
 def frontend_dist_dir() -> Path:
@@ -50,19 +73,9 @@ def mount_frontend(app: FastAPI) -> None:
     async def spa_index() -> FileResponse:
         return FileResponse(index_path)
 
-    blocked_prefixes = ("api/",)
-    blocked_exact = {
-        "health",
-        "openapi.json",
-        "docs",
-        "redoc",
-    }
-
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str) -> FileResponse:
-        if full_path in blocked_exact or full_path.startswith(blocked_prefixes):
-            from fastapi import HTTPException
-
+        if is_reserved_api_path(full_path):
             raise HTTPException(status_code=404, detail="Not found")
         candidate = dist / full_path
         if candidate.is_file():
