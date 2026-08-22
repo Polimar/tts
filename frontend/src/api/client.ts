@@ -3,13 +3,11 @@ import { getToken } from './token'
 
 export class HttpError extends Error {
   readonly status: number
-  readonly code?: string
 
   constructor(status: number, body: ApiError) {
     super(body.detail)
     this.name = 'HttpError'
     this.status = status
-    this.code = body.code
   }
 }
 
@@ -29,17 +27,13 @@ function detailFromBody(body: unknown): string {
       })
       .join('; ')
   }
-  if (typeof record.message === 'string') return record.message
   return 'Si è verificato un errore imprevisto.'
 }
 
 async function parseError(response: Response): Promise<ApiError> {
   try {
-    const body = (await response.json()) as Record<string, unknown>
-    return {
-      code: typeof body.code === 'string' ? body.code : undefined,
-      detail: detailFromBody(body),
-    }
+    const body = await response.json()
+    return { detail: detailFromBody(body) }
   } catch {
     return {
       detail: `Richiesta fallita (${response.status}).`,

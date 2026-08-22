@@ -1,5 +1,4 @@
 export interface ApiError {
-  code?: string
   detail: string
 }
 
