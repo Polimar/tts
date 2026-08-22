@@ -4,33 +4,17 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class VoiceStatus {
-    @SerialName("processing")
-    PROCESSING,
-
-    @SerialName("ready")
-    READY,
-
-    @SerialName("failed")
-    FAILED,
-}
-
-@Serializable
 data class Voice(
     val id: String,
     val name: String,
-    val status: VoiceStatus,
-    @SerialName("reference_text")
-    val referenceText: String? = null,
+    @SerialName("duration_sec")
+    val durationSec: Float? = null,
     @SerialName("created_at")
-    val createdAt: String? = null,
-    @SerialName("updated_at")
-    val updatedAt: String? = null,
+    val createdAt: String,
 )
 
 @Serializable
-data class CreateVoiceRequest(
-    val name: String,
-    @SerialName("reference_text")
-    val referenceText: String? = null,
+data class VoiceListResponse(
+    val items: List<Voice>,
+    val total: Int,
 )

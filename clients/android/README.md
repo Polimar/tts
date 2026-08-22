@@ -1,20 +1,27 @@
-# Client HTTP Kotlin per TTS (Android-compatible)
+# Client Kotlin per API TTS (Android-compatible)
 
-Modulo libreria **senza UI**: tipi Kotlin + client HTTP per l'API FastAPI del progetto [tts](https://github.com/Polimar/tts).
+Modulo libreria **senza UI**: DTO, enum, modelli errore e contratto `AuthClient` allineati a [`openapi.yaml`](https://github.com/Polimar/tts/blob/main/openapi.yaml) (PR #3 Architect).
 
-- Base path: `/api/v1`
-- JSON `snake_case` (kotlinx.serialization + `@SerialName`)
-- Auth: email/password con **cookie di sessione httpOnly** (OkHttp `CookieJar`)
-- Audio job: supporto header `Range` e risposta `206 Partial Content`
+**Mobile Dev** implementa Retrofit/OkHttp (cookie `tts_session`, multipart, Range audio).  
+**Questo modulo** fornisce tipi Kotlin 1:1 con OpenAPI — nessun mapping sorpresa.
 
-> **Nota contratto:** al momento del commit non esiste ancora OpenAPI nel repo (`main` ha solo il README). I tipi seguono il contratto API concordato per il backend su `0.0.0.0:8765`. Quando sarà disponibile `docs/openapi.yaml`, allineare i modelli.
+## Source of truth
 
-## Requisiti
+| File | PR |
+|------|-----|
+| `openapi.yaml` | [#3](https://github.com/Polimar/tts/pull/3) |
+| `docs/API.md` | [#3](https://github.com/Polimar/tts/pull/3) |
+| `docs/ARCHITECTURE.md` | [#3](https://github.com/Polimar/tts/pull/3) |
 
-- JDK 21+ (o 17+ con toolchain Gradle configurata)
-- Gradle 8.10+ (wrapper incluso)
+## Hard lock (API v1)
 
-Il modulo è **JVM Kotlin** (non richiede Android SDK per compilare) ed è pensato per essere incluso in app Android via Gradle (`implementation(project(...))` o pubblicazione Maven locale).
+- Cookie sessione: **`tts_session`** (httpOnly, non Bearer)
+- Prefisso: **`/api/v1`**, JSON **snake_case**
+- Errori: `{ "code", "detail" }` (italiano, `code` stabile → enum `ErrorCode`)
+- Coda FIFO: max **10** `queued`, **1** `running` → `POST /jobs` → **409** `queue_full`
+- Audio: `GET /jobs/{job_id}/audio` autenticato, WAV, supporto **Range** (200/206)
+- Voci server-side: `data/users/<id>/voices`
+- `job.status`: `queued` \| `running` \| `done` \| `failed` \| `cancelled`
 
 ## Compilazione
 
@@ -23,132 +30,117 @@ cd clients/android
 ./gradlew :tts-client:build
 ```
 
-Solo test:
+Requisiti: JDK 21+ (o 17+ con toolchain Gradle).
 
-```bash
-./gradlew :tts-client:test
-```
+## Dipendenze esportate
 
-## Punto il client al server
+- `kotlinx-serialization-json`
+- `kotlinx-coroutines-core` (per `AuthClient` suspend)
 
-Il server FastAPI è in ascolto su `http://<host>:8765` (bind `0.0.0.0:8765`).
+Nessuna dipendenza OkHttp/Retrofit — a carico del Mobile Dev.
 
-| Ambiente | URL tipico |
-|----------|------------|
-| Emulatore Android | `http://10.0.2.2:8765` |
-| Dispositivo fisico (stessa LAN) | `http://192.168.x.x:8765` |
-| Sviluppo locale (JVM/desktop) | `http://127.0.0.1:8765` |
+## Uso tipi
 
 ```kotlin
-import it.polimar.tts.client.TtsApi
-import it.polimar.tts.client.TtsClientConfig
+import it.polimar.tts.client.TtsJson
+import it.polimar.tts.client.model.AuthResponse
+import it.polimar.tts.client.model.CreateJobRequest
+import it.polimar.tts.client.model.SourceType
 
-val api = TtsApi.create(
-    TtsClientConfig(baseUrl = "http://10.0.2.2:8765"),
+val auth = TtsJson.decodeFromString<AuthResponse>(responseBody)
+
+val jobRequest = CreateJobRequest(
+    voiceId = voiceId,
+    sourceType = SourceType.TEXT,
+    text = "C'era una volta...",
+    title = "Capitolo 1",
 )
+val jsonBody = TtsJson.encodeToString(jobRequest)
 ```
 
-## Uso rapido
-
-### Autenticazione
+## AuthClient (interfaccia)
 
 ```kotlin
-val user = api.auth.register("mario@example.com", "password-sicura")
-// oppure
-api.auth.login("mario@example.com", "password-sicura")
+import it.polimar.tts.client.TtsApiConstants
+import it.polimar.tts.client.auth.AuthClient
 
-val me = api.auth.me()
-api.auth.logout()
+// Cookie da inviare su ogni richiesta autenticata:
+TtsApiConstants.SESSION_COOKIE_NAME // "tts_session"
+
+// Path relativi a baseUrl = http://<host>:8765/api/v1
+TtsApiConstants.Paths.AUTH_LOGIN    // /auth/login
 ```
 
-I cookie di sessione vengono gestiti automaticamente da `InMemoryCookieJar` (default). Per persistenza tra riavvii, passa un `CookieJar` custom in `TtsClientConfig`.
+| Metodo | HTTP | Success |
+|--------|------|---------|
+| `register` | POST `/auth/register` | **201** + `Set-Cookie: tts_session=...` |
+| `login` | POST `/auth/login` | **200** + cookie |
+| `logout` | POST `/auth/logout` | **204** |
+| `me` | GET `/auth/me` | **200** `AuthResponse` |
 
-### Voci
+## Modelli principali
+
+| Kotlin | OpenAPI schema |
+|--------|----------------|
+| `AuthResponse` | `AuthResponse` |
+| `User` | `User` |
+| `Voice` / `VoiceListResponse` | `Voice` / `VoiceListResponse` |
+| `Job` / `JobDetail` / `JobListResponse` | `Job` / `JobDetail` / `JobListResponse` |
+| `JobCancelled` | `JobCancelled` |
+| `CreateJobRequest` | `CreateJobRequest` |
+| `ApiError` + `ErrorCode` | `Error` + `ErrorCode` |
+| `JobStatus` | `JobStatus` |
+| `SourceType` | `SourceType` |
+
+## Upload voce (multipart — implementazione Mobile Dev)
+
+Campi form (vedi `TtsApiConstants.VoiceMultipart`):
+
+| Campo | Obbligatorio |
+|-------|--------------|
+| `name` | sì |
+| `reference_audio` | sì (WAV/MP3/MP4/M4A, max 20 MB) |
+
+## Audio Range
 
 ```kotlin
-val voices = api.voices.list()
-
-val created = api.voices.create(
-    name = "Narratore",
-    audioFile = File("/path/reference.wav"),
-    referenceText = "Testo di riferimento per la clonazione",
-)
-
-api.voices.delete(created.id)
+TtsApiConstants.Audio.rangeBytes(0L..1023L) // "bytes=0-1023"
+// Header: Range: bytes=0-1023
+// Risposta attesa: 206 + Content-Range
 ```
 
-Upload: `multipart/form-data` con campi `name`, `reference_text` (opzionale), `audio` (file WAV).
-
-### Job TTS
+## Errori
 
 ```kotlin
-val job = api.jobs.create(
-    text = "Ciao, questo è un test.",
-    voiceId = created.id,
-)
+import it.polimar.tts.client.TtsErrorParser
+import it.polimar.tts.client.TtsApiException
 
-val status = api.jobs.get(job.id)
-
-// Download completo
-val audio = api.jobs.getAudio(job.id)
-val wavBytes = audio.bytes()
-audio.body.close()
-
-// Download parziale (streaming / resume)
-val chunk = api.jobs.getAudio(job.id, range = 0L..65535L)
-chunk.byteStream().use { input ->
-    // leggi lo stream
-}
-chunk.body.close()
+val apiError = TtsErrorParser.parse(errorBody)
+// apiError?.code == ErrorCode.QUEUE_FULL
 ```
 
-### Errori
-
-Le risposte di errore JSON `{ "code", "detail" }` diventano `TtsApiException`:
+## Integrazione Gradle (app Android)
 
 ```kotlin
-try {
-    api.auth.login("x", "y")
-} catch (e: TtsApiException) {
-    println("${e.code}: ${e.message}") // detail in italiano dal server
-}
-```
-
-## Struttura API coperta
-
-| Risorsa | Metodi |
-|---------|--------|
-| Auth | `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
-| Voices | `GET /voices`, `POST /voices`, `DELETE /voices/{id}` |
-| Jobs | `GET /jobs`, `POST /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/audio` |
-
-### Enum job status
-
-`queued` · `running` · `done` · `failed`
-
-## Integrazione in un modulo Android
-
-In `settings.gradle.kts` dell'app:
-
-```kotlin
+// settings.gradle.kts
 include(":tts-client")
 project(":tts-client").projectDir = file("../clients/android/tts-client")
-```
 
-In `app/build.gradle.kts`:
-
-```kotlin
+// app/build.gradle.kts
 dependencies {
     implementation(project(":tts-client"))
 }
 ```
 
-Per HTTP cleartext verso `http://` in debug, configurare `android:usesCleartextTraffic` o Network Security Config.
+Per HTTP cleartext verso `http://` in debug: Network Security Config / `usesCleartextTraffic`.
 
-## Package principali
+## Package
 
-- `it.polimar.tts.client.TtsApi` — facade
-- `it.polimar.tts.client.AuthClient`
-- `it.polimar.tts.client.VoicesClient`
-- `it.polimar.tts.client.JobsClient`
-- `it.polimar.tts.client.model.*` — DTO serializzabili
+```
+it.polimar.tts.client
+  TtsApiConstants, TtsJson, TtsErrorParser, TtsApiException
+it.polimar.tts.client.auth
+  AuthClient
+it.polimar.tts.client.model
+  * (tutti i DTO)
+```
